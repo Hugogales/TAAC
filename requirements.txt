@@ -1,0 +1,31 @@
+# Core dependencies
+torch>=2.0.0
+numpy>=1.21.0
+gymnasium>=0.29.0
+pettingzoo>=1.24.0
+supersuit>=3.9.0
+
+# Environment-specific dependencies
+# CookingZoo (install separately if needed)
+# cooking_zoo  # Uncomment if available via pip
+
+# MPE environments (included with PettingZoo)
+# pettingzoo[mpe]  # Automatically included
+
+# Atari environments (optional)
+# pettingzoo[atari]
+
+# Additional utilities
+matplotlib>=3.5.0
+pyyaml>=6.0
+tensorboard>=2.10.0  # Optional for advanced logging
+tqdm>=4.64.0  # Progress bars
+
+# Development dependencies (optional)
+jupyter>=1.0.0
+ipython>=8.0.0
+
+# Note: Some environments may require additional dependencies:
+# - BoxJump: Check specific requirements
+# - MATS Gym: Check specific requirements
+# - For GPU support: Install appropriate CUDA version of PyTorch 

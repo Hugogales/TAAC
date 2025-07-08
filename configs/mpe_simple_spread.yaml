@@ -1,0 +1,43 @@
+environment:
+  name: mpe_simple_spread
+  env_kwargs:
+    N: 3  # Number of agents
+    local_ratio: 0.5  # Balance between local and global rewards
+    max_cycles: 25
+    continuous_actions: true  # Set to false for discrete actions
+    render_mode: null
+  apply_wrappers: true
+
+training:
+  episodes: 1000
+  max_steps_per_episode: 25
+  gamma: 0.95  # Lower gamma for shorter episodes
+  learning_rate: 1e-3  # Higher learning rate for quick adaptation
+  epsilon_clip: 0.2
+  K_epochs: 4  # Fewer epochs for shorter episodes
+  c_entropy: 0.05  # Higher entropy for exploration
+  max_grad_norm: 0.5
+  c_value: 0.5
+  lam: 0.95
+  batch_size: 32  # Smaller batch size for quick episodes
+  min_learning_rate: 1e-6
+  similarity_loss_coef: 0.15  # Moderate cooperation for spreading
+
+logging:
+  log_interval: 50
+  save_interval: 200
+  eval_interval: 100
+  save_best_model: true
+
+model:
+  num_heads: 4
+  embedding_dim: 256
+  hidden_size: 512
+  save_dir: "files/Models"
+  model_name: "TAAC_mpe_simple_spread"
+
+# Environment-specific notes:
+# - SimpleSpread requires agents to spread out and cover landmarks
+# - Short episodes require quick learning and adaptation
+# - Higher entropy promotes exploration of different spreading strategies
+# - Local ratio balances individual vs. collective rewards 

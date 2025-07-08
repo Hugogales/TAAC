@@ -1,0 +1,42 @@
+environment:
+  name: boxjump
+  env_kwargs:
+    num_agents: 2
+    max_cycles: 500
+    continuous_actions: false  # Assuming discrete actions for now
+    render_mode: null
+  apply_wrappers: true
+
+training:
+  episodes: 3000
+  max_steps_per_episode: 500
+  gamma: 0.995  # Higher gamma for longer episodes with delayed rewards
+  learning_rate: 2e-4  # Slightly lower for more stable training
+  epsilon_clip: 0.2
+  K_epochs: 10
+  c_entropy: 0.01  # Lower entropy for more focused policy
+  max_grad_norm: 0.5
+  c_value: 0.5
+  lam: 0.95
+  batch_size: 128  # Larger batch size for physics environments
+  min_learning_rate: 1e-6
+  similarity_loss_coef: 0.1  # Moderate cooperation requirement
+
+logging:
+  log_interval: 20
+  save_interval: 200
+  eval_interval: 100
+  save_best_model: true
+
+model:
+  num_heads: 6  # More attention heads for complex physics
+  embedding_dim: 512  # Larger embedding for complex states
+  hidden_size: 1024   # Larger hidden size for physics modeling
+  save_dir: "files/Models"
+  model_name: "TAAC_boxjump"
+
+# Environment-specific notes:
+# - BoxJump involves physics simulation requiring precise timing
+# - Higher gamma accounts for longer episodes and delayed rewards
+# - Larger network capacity for complex physics modeling
+# - Lower entropy for more deterministic physics-based actions 
