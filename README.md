@@ -60,21 +60,20 @@ TAAC (previously HUGO - "Hierarchical Unified Generalized Optimization") is a mu
    # Install other dependencies
    pip install swig pygame numpy
    
-   # Option 1: Install in temporary directory (recommended)
-   cd ..
+   # Create environments directory if it doesn't exist
+   mkdir -p environments
+   cd environments
+   
+   # Clone BoxJump repository
    git clone https://github.com/zzbuzzard/boxjump
-   cd boxjump && pip install -e . && cd ../TAAC
+   cd boxjump && pip install -e . && cd ../..
    
-   # Option 2: Install locally (boxjump/ added to .gitignore)
-   # git clone https://github.com/zzbuzzard/boxjump
-   # cd boxjump && pip install -e . && cd ..
-   
-   # Test: python -c "from boxjump.box_env import BoxJumpEnvironment; print('Success!')"
+   # Test: python -c "from environments.boxjump.box_env import BoxJumpEnvironment; print('Success!')"
    ```
 
 5. **Quick test**:
    ```bash
-   python run_taac.py --config configs/mpe_simple_spread.yaml --episodes 10
+   python scripts/train.py --config configs/mpe_simple_spread.yaml --episodes 10
    ```
 
 ## Quick Start
@@ -82,37 +81,37 @@ TAAC (previously HUGO - "Hierarchical Unified Generalized Optimization") is a mu
 ### 1. Train with Default Config (MPE Simple Spread)
 
 ```bash
-python run_taac.py --config configs/mpe_simple_spread.yaml
+python scripts/train.py --config configs/mpe_simple_spread.yaml
 ```
 
 ### 2. Train on BoxJump (Physics-Based Cooperation)
 
 ```bash
-python run_taac.py --config configs/boxjump.yaml
+python scripts/train.py --config configs/boxjump.yaml
 ```
 
 ### 3. Train on CookingZoo Environment
 
 ```bash
-python run_taac.py --config configs/cooking_zoo.yaml
+python scripts/train.py --config configs/cooking_zoo.yaml
 ```
 
 ### 4. Train with Custom Episode Count
 
 ```bash
-python run_taac.py --config configs/cooking_zoo.yaml --episodes 5000
+python scripts/train.py --config configs/cooking_zoo.yaml --episodes 5000
 ```
 
 ### 5. Evaluate a Trained Model
 
 ```bash
-python run_taac.py --config configs/mpe_simple_spread.yaml --eval_only --model_path files/Models/mpe_simple_spread/best_model.pth
+python scripts/train.py --config configs/mpe_simple_spread.yaml --eval_only --model_path files/Models/mpe_simple_spread/best_model.pth
 ```
 
 ### 6. Train with Live Rendering
 
 ```bash
-python run_taac.py --config configs/boxjump.yaml --render
+python scripts/train.py --config configs/boxjump.yaml --render
 ```
 
 ## BoxJump Setup & Usage
@@ -128,15 +127,16 @@ conda install -c conda-forge box2d-py
 # 2. Install other dependencies
 pip install swig pygame numpy
 
-# 3. Clone and install BoxJump (outside your repo to avoid git conflicts)
-cd ..
+# 3. Clone and install BoxJump in environments directory
+mkdir -p environments
+cd environments
 git clone https://github.com/zzbuzzard/boxjump
 cd boxjump
 pip install -e .
-cd ../TAAC
+cd ../..
 
 # 4. Test installation
-python -c "from boxjump.box_env import BoxJumpEnvironment; print('BoxJump installed successfully!')"
+python -c "from environments.boxjump.box_env import BoxJumpEnvironment; print('BoxJump installed successfully!')"
 ```
 
 **Important**: Use `conda` for `box2d-py` on Windows - pip compilation often fails. If you don't have conda, you can install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) first.
@@ -167,16 +167,19 @@ python -c "from boxjump.box_env import BoxJumpEnvironment; print('BoxJump ready!
 
 ```bash
 # Train with default settings (4 agents, cooperative tower building)
-python run_taac.py --config configs/boxjump.yaml
+python scripts/train.py --config configs/boxjump.yaml
 
 # Train with visualization (watch the boxes build towers!)
-python run_taac.py --config configs/boxjump.yaml --render
+python scripts/train.py --config configs/boxjump.yaml --render
 
 # Train for longer with more episodes
-python run_taac.py --config configs/boxjump.yaml --episodes 5000
+python scripts/train.py --config configs/boxjump.yaml --episodes 5000
 
 # Evaluate a trained BoxJump model
-python run_taac.py --config configs/boxjump.yaml --eval_only --model_path files/Models/boxjump/best_model.pth
+python scripts/train.py --config configs/boxjump.yaml --eval_only --model_path files/Models/boxjump/best_model.pth
+
+# Use parallel environment execution for faster training (8 processes)
+python scripts/parallel_env_example.py --config configs/boxjump.yaml --num_processes 8
 ```
 
 ### BoxJump Configuration Options
@@ -257,7 +260,11 @@ model:
 
 ```
 TAAC/
-├── run_taac.py              # 🚀 Main runner script (START HERE)
+├── scripts/                  # 🚀 Main scripts (START HERE)
+│   ├── train.py              # Training script (formerly run_taac.py)
+│   ├── view.py               # Model visualization/rendering
+│   ├── profiler.py           # Performance profiling
+│   └── parallel_env_example.py # True parallel environment execution
 ├── AI/
 │   ├── TAAC.py              # Core TAAC algorithm
 │   ├── env_wrapper.py       # Environment wrapper system  
@@ -267,6 +274,10 @@ TAAC/
 │   ├── boxjump.yaml         # Template for custom environments
 │   ├── cooking_zoo.yaml
 │   └── mats_gym.yaml
+├── environments/            # 🌍 Environment repositories
+│   ├── boxjump/             # BoxJump environment
+│   ├── cooking_zoo/         # CookingZoo environment
+│   └── mats_gym/            # MATS Gym environment
 ├── files/                   # 💾 Model storage (organized by environment)
 │   └── Models/
 │       ├── boxjump/
@@ -315,14 +326,27 @@ TAAC uses a centralized training, decentralized execution approach with:
 
 To add a new PettingZoo environment:
 
-1. **Update `env_wrapper.py`**:
+1. **Install the environment in the environments directory**:
+   ```bash
+   mkdir -p environments
+   cd environments
+   git clone https://github.com/your-org/your_env
+   cd your_env
+   pip install -e .
+   cd ../..
+   ```
+
+2. **Update `env_wrapper.py`**:
    ```python
    elif env_name == 'your_env':
-       from your_env import parallel_env
+       try:
+           from environments.your_env import parallel_env
+       except ImportError:
+           from your_env import parallel_env
        return parallel_env(**kwargs)
    ```
 
-2. **Create configuration file**:
+3. **Create configuration file**:
    ```yaml
    # configs/your_env.yaml
    environment:
@@ -331,9 +355,9 @@ To add a new PettingZoo environment:
        # Your environment parameters
    ```
 
-3. **Train**:
+4. **Train**:
    ```bash
-   python AI/train_taac.py --env your_env --config configs/your_env.yaml
+   python scripts/train.py --config configs/your_env.yaml
    ```
 
 ### Centralized vs. PettingZoo Parallel API

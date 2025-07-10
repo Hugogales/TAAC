@@ -103,8 +103,13 @@ venv.bak/
 jobs/
 jobs/*
 
-# External repositories (don't commit third-party repos)
-boxjump/ 
-boxjump/*
-./boxjump/
-boxjump
+# profiler
+profiles/
+profiles/*
+./profiles/
+
+# External environment repositories
+# Don't commit third-party repositories in environments directory
+# but keep the directory structure with a .gitkeep
+environments/*
+!environments/.gitkeep

@@ -66,7 +66,7 @@ def config_to_args(config, args):
     training = config.get('training', {})
     
     # Use provided episodes or default to small number for profiling
-    episodes = args.episodes or training.get('episodes', 5)
+    episodes = args.episodes or 5
     cmd_args.extend(['--episodes', str(episodes)])
     
     if 'learning_rate' in training:
@@ -244,7 +244,7 @@ After profiling, view results with:
     
     # Optional arguments
     parser.add_argument('--episodes', type=int, default=None,
-                       help='Number of episodes to profile (default: 5 or config value)')
+                       help='Number of episodes to profile (default: 5)')
     parser.add_argument('--output', type=str, default=None,
                        help='Output profile filename (default: auto-generated)')
     parser.add_argument('--view', action='store_true',
@@ -264,7 +264,7 @@ After profiling, view results with:
         
         # Generate profile filename
         env_name = config['environment']['name']
-        episodes = args.episodes or config.get('training', {}).get('episodes', 5)
+        episodes = args.episodes or 5
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if args.output:

@@ -4,7 +4,16 @@ from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 from supersuit import pad_observations_v0, pad_action_space_v0
 import importlib
+import sys
+import os
+from pathlib import Path
 from typing import Dict, Any, List, Tuple
+
+
+# Add environments directory to path for environment imports
+ENVIRONMENTS_DIR = Path(__file__).parent.parent / "environments"
+if ENVIRONMENTS_DIR.exists() and str(ENVIRONMENTS_DIR) not in sys.path:
+    sys.path.append(str(ENVIRONMENTS_DIR))
 
 
 def make_env(env_name: str, **kwargs) -> ParallelEnv:
@@ -20,25 +29,55 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
     """
     if env_name == 'cooking_zoo':
         try:
-            from cooking_zoo.environment import parallel_env
+            # Try to import from environments directory first
+            try:
+                from environments.cooking_zoo.environment import parallel_env
+            except ImportError:
+                # Fall back to regular import if not found in environments directory
+                from cooking_zoo.environment import parallel_env
             return parallel_env(**kwargs)
         except ImportError:
-            raise ImportError("cooking_zoo not installed. Install with: pip install cooking_zoo")
+            raise ImportError(
+                "cooking_zoo not installed. Install with:\n"
+                "cd environments\n"
+                "git clone https://github.com/cooking-gym/cooking-gym cooking_zoo\n"
+                "cd cooking_zoo && pip install -e ."
+            )
     
     elif env_name == 'boxjump':
         try:
-            from boxjump.box_env import BoxJumpEnvironment
+            # Try to import from environments directory first
+            try:
+                from environments.boxjump.box_env import BoxJumpEnvironment
+            except ImportError:
+                # Fall back to regular import if not found in environments directory
+                from boxjump.box_env import BoxJumpEnvironment
             # BoxJump uses custom environment class, need to wrap it
             return _wrap_boxjump_env(**kwargs)
         except ImportError:
-            raise ImportError("BoxJump not installed. Install with: git clone https://github.com/zzbuzzard/boxjump && cd boxjump && pip install -e .")
+            raise ImportError(
+                "BoxJump not installed. Install with:\n"
+                "cd environments\n"
+                "git clone https://github.com/zzbuzzard/boxjump\n"
+                "cd boxjump && pip install -e ."
+            )
     
     elif env_name == 'mats_gym':
         try:
-            from mats_gym import parallel_env
+            # Try to import from environments directory first
+            try:
+                from environments.mats_gym import parallel_env
+            except ImportError:
+                # Fall back to regular import if not found in environments directory
+                from mats_gym import parallel_env
             return parallel_env(**kwargs)
         except ImportError:
-            raise ImportError("mats_gym not installed")
+            raise ImportError(
+                "mats_gym not installed. Install with:\n"
+                "cd environments\n"
+                "git clone https://github.com/your-repo/mats_gym\n" 
+                "cd mats_gym && pip install -e ."
+            )
     
     elif env_name.startswith('mpe_'):
         # Multi-agent particle environments
@@ -81,7 +120,12 @@ def _wrap_boxjump_env(**kwargs) -> ParallelEnv:
     Returns:
         PettingZoo-compatible parallel environment
     """
-    from boxjump.box_env import BoxJumpEnvironment
+    # Try to import from environments directory first
+    try:
+        from environments.boxjump.box_env import BoxJumpEnvironment
+    except ImportError:
+        # Fall back to regular import if not found in environments directory
+        from boxjump.box_env import BoxJumpEnvironment
     
     # Convert PettingZoo parameters to BoxJump parameters
     boxjump_kwargs = kwargs.copy()

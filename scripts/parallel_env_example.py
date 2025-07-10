@@ -254,6 +254,40 @@ def run_parallel_training(config, num_processes=4, num_episodes=None, model_path
             
             print(f"Episode {episode}/{episodes}: Reward: {avg_reward:.2f}, Length: {avg_length:.1f}{height_str}{entropy_str}{sim_loss_str}, Speed: {eps_per_sec:.2f} eps/sec")
             
+            # For single process training, show more detailed entropy information
+            if num_processes == 1 and batch_entropies:
+                # If we only have one process, we can show more detailed entropy information
+                last_result = results[0][0]  # Get stats from the first (and only) result
+                
+                # If entropy data is available in the raw result
+                if 'normalized_entropy' in last_result and last_result['normalized_entropy'] is not None:
+                    normalized_entropy = last_result['normalized_entropy']
+                    
+                    # Scale to percentage for easier interpretation
+                    entropy_percent = normalized_entropy * 100
+                    
+                    # Print interpretation based on entropy level
+                    if entropy_percent > 90:
+                        entropy_interpretation = "almost random (high exploration)"
+                    elif entropy_percent > 70:
+                        entropy_interpretation = "highly exploratory"
+                    elif entropy_percent > 50:
+                        entropy_interpretation = "moderately exploratory"
+                    elif entropy_percent > 30:
+                        entropy_interpretation = "becoming more deterministic"
+                    elif entropy_percent > 10:
+                        entropy_interpretation = "mostly deterministic"
+                    else:
+                        entropy_interpretation = "highly deterministic (exploiting)"
+                    
+                    print(f"  > Entropy Details: {entropy_percent:.1f}% of maximum entropy - {entropy_interpretation}")
+                    
+                    # For discrete action spaces, show distribution interpretation
+                    if env_config['action_space_type'] == "discrete":
+                        num_actions = env_config.get('num_actions', env_config.get('action_size'))
+                        if num_actions > 1:
+                            print(f"  > For reference: 100% = uniform random across {num_actions} actions, 0% = always same action")
+            
             # Save model periodically
             if episode % config['logging']['save_interval'] == 0:
                 model_name = f"{config['model']['model_name']}_ep{episode}"
