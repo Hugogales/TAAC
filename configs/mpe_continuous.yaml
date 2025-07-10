@@ -1,3 +1,7 @@
+# Model loading (optional)
+# Set this to continue training from an existing model or for view.py
+load_model: null  # Example: "files/Models/mpe_continuous/best_model.pth"
+
 environment:
   name: mpe_simple_spread
   env_kwargs:

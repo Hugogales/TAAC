@@ -1,3 +1,7 @@
+# Model loading (optional)
+# Set this to continue training from an existing model or for view.py
+load_model: null  # Example: "files/Models/mpe_simple_spread/best_model.pth"
+
 environment:
   name: mpe_simple_spread
   env_kwargs:
@@ -8,6 +12,7 @@ environment:
     render_mode: null
   apply_wrappers: true
 
+# Training Configuration  
 training:
   episodes: 1000
   max_steps_per_episode: 25
@@ -22,19 +27,26 @@ training:
   batch_size: 32  # Smaller batch size for quick episodes
   min_learning_rate: 1e-6
   similarity_loss_coef: 0.15  # Moderate cooperation for spreading
+  num_parallel: 6  # Number of parallel environments (6 works well for short episodes)
 
-logging:
-  log_interval: 50
-  save_interval: 200
-  eval_interval: 100
-  save_best_model: true
-
+# Model Architecture
 model:
   num_heads: 4
   embedding_dim: 256
   hidden_size: 512
-  save_dir: "files/Models"
-  model_name: "TAAC_mpe_simple_spread"
+
+# Logging & Evaluation
+logging:
+  log_interval: 50      # Print stats every N episodes
+  save_interval: 200    # Save model every N episodes  
+  eval_interval: 100    # Evaluate model every N episodes
+  eval_episodes: 5      # Number of episodes for evaluation
+
+# Output Configuration
+output:
+  experiment_name: "mpe_simple_spread_experiment"
+  model_save_path: "files/Models/mpe_simple_spread/"
+  log_save_path: "experiments/mpe_simple_spread/"
 
 # Environment-specific notes:
 # - SimpleSpread requires agents to spread out and cover landmarks

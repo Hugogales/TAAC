@@ -1,42 +1,134 @@
+# BoxJump Environment Configuration
+# Cooperative tower-building with Box2D physics simulation
+# Goal: Build the tallest tower possible by stacking boxes cooperatively
+
+# Model loading (optional)
+# Set this to continue training from an existing model or for view.py
+load_model: null  # Example: "files/Models/boxjump/best_model.pth"
+
 environment:
-  name: boxjump
+  name: "boxjump"
   env_kwargs:
-    num_agents: 2
-    max_cycles: 500
-    continuous_actions: false  # Assuming discrete actions for now
-    render_mode: null
-  apply_wrappers: true
+    # === CORE ENVIRONMENT SETTINGS ===
+    num_boxes: 4                    # Number of box agents (2-16). More agents = harder coordination
+    world_width: 10                 # Environment width in Box2D units
+    world_height: 6                 # Environment height in Box2D units  
+    max_timestep: 1500                # Episode length in steps (minimal to avoid indexing bug)
+    
+    # === BOX PHYSICS SETTINGS ===
+    box_width: 1.0                  # Width of each box agent
+    box_height: 1.0                 # Height of each box agent
+    fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
+    gravity: 10                     # Gravity force (higher = faster falling)
+    friction: 0.8                   # Friction between boxes (0-1, higher = less slippery)
+    angular_damping: 1              # Prevents excessive spinning (higher = less spinning)
+    
+    # === STARTING POSITIONS ===
+    spacing: 1.5                    # Horizontal spacing between boxes at start
+    random_spacing: 0.5             # Randomness in starting positions (0 = fixed positions)
+    
+    # === REWARD SYSTEM ===
+    reward_mode: "highest"          # Reward scheme:
+                                    #   "highest" - reward when new max height achieved (cooperative)
+                                    #   "highest_stable" - same but only for stable (non-jumping) boxes
+                                    #   "height_sq" - each agent gets height^2 reward each step
+                                    #   "stable_sum" - height^2 but only when not falling
+    penalty_fall: 20                # Penalty per step for agents that fall off the map
+    
+    # === OBSERVATION SETTINGS ===
+    include_time: true              # Include time remaining (0-1) in observations
+    include_highest: true           # Include current best height in observations
+    agent_one_hot: false            # Include agent ID as one-hot vector in observations
+    
+    # === RENDERING ===
+    render_mode: null                  # null = no rendering (training), "human" = PyGame window
+    
+  apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
 
-training:
-  episodes: 3000
-  max_steps_per_episode: 500
-  gamma: 0.995  # Higher gamma for longer episodes with delayed rewards
-  learning_rate: 2e-4  # Slightly lower for more stable training
-  epsilon_clip: 0.2
-  K_epochs: 10
-  c_entropy: 0.01  # Lower entropy for more focused policy
-  max_grad_norm: 0.5
-  c_value: 0.5
-  lam: 0.95
-  batch_size: 128  # Larger batch size for physics environments
-  min_learning_rate: 1e-6
-  similarity_loss_coef: 0.1  # Moderate cooperation requirement
-
-logging:
-  log_interval: 20
-  save_interval: 200
-  eval_interval: 100
-  save_best_model: true
-
+# Model Architecture - LIGHTWEIGHT FOR BOXJUMP
 model:
-  num_heads: 6  # More attention heads for complex physics
-  embedding_dim: 512  # Larger embedding for complex states
-  hidden_size: 1024   # Larger hidden size for physics modeling
-  save_dir: "files/Models"
-  model_name: "TAAC_boxjump"
+  num_heads: 2                      # Multi-head attention heads (reduced from 4)
+  embedding_dim: 64                # Attention embedding dimension (reduced from 256)
+  hidden_size: 128                  # Hidden layer size for networks (reduced from 526)
+  model_name: "boxjump_taac"        # Base name for saved models
 
-# Environment-specific notes:
-# - BoxJump involves physics simulation requiring precise timing
-# - Higher gamma accounts for longer episodes and delayed rewards
-# - Larger network capacity for complex physics modeling
-# - Lower entropy for more deterministic physics-based actions 
+# Training Configuration  
+training:
+  episodes: 100                      # Total training episodes (good for testing)
+  max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
+  gamma: 0.995                      # Discount factor (higher for delayed tower rewards)
+  learning_rate: 0.0005             # Learning rate for Adam optimizer
+  epsilon_clip: 0.2                 # PPO clipping parameter
+  K_epochs: 10                       # PPO update epochs per batch
+  c_entropy: 0.05                   # Entropy coefficient for exploration
+  max_grad_norm: 20               # Gradient clipping norm
+  c_value: 0.5                      # Value function loss coefficient
+  lam: 0.97                         # GAE lambda parameter
+  batch_size: 128                    # Training batch size (very small for stability)
+  min_learning_rate: 0.0001       # Minimum learning rate for scheduler
+  similarity_loss_coef: 0.0         # Cooperation loss (higher = more coordinated behavior)
+  num_parallel: 1                   # Number of parallel environments (1 = single env, 4+ = parallel training)
+
+# Logging & Evaluation
+logging:
+  log_interval: 10                  # Log training stats every N episodes
+  save_interval: 100                # Save model checkpoint every N episodes  
+  eval_interval: 50                 # Run evaluation every N episodes
+  eval_episodes: 5                  # Number of episodes per evaluation
+  save_best_model: true             # Save best performing model
+
+# Output Configuration
+output:
+  experiment_name: "boxjump_experiment"
+  model_save_path: "files/Models/boxjump/"
+  log_save_path: "experiments/boxjump/"
+
+# === DIFFICULTY PROGRESSION GUIDE ===
+# 
+# EASY (Learning Basics):
+#   num_boxes: 2-3, fixed_rotation: true, reward_mode: "highest"
+#   gravity: 8, spacing: 2.0, episodes: 1000
+#
+# MEDIUM (Standard Training):  
+#   num_boxes: 4-6, fixed_rotation: true, reward_mode: "highest_stable"
+#   gravity: 10, spacing: 1.5, episodes: 2000
+#
+# HARD (Advanced Coordination):
+#   num_boxes: 8-12, fixed_rotation: false, reward_mode: "height_sq"
+#   gravity: 12, penalty_fall: 30, episodes: 3000
+#
+# EXPERT (Maximum Challenge):
+#   num_boxes: 16, fixed_rotation: false, reward_mode: "stable_sum"
+#   gravity: 15, penalty_fall: 50, random_spacing: 1.0, episodes: 5000
+
+# === ACTION SPACE ===
+# 4 discrete actions per agent:
+#   0 = do nothing
+#   1 = apply force to the left  
+#   2 = apply force to the right
+#   3 = jump (only works if agent is stable)
+
+# === OBSERVATION SPACE ===
+# 13-dimensional vector per agent (when using default settings):
+#   0: Horizontal position (normalized -1 to 1)
+#   1: Height above floor (0 = on floor, n = n boxes high)
+#   2-3: Velocity (vx, vy)
+#   4: Angle in quarter turns (-0.5 to 0.5)
+#   5: Angular velocity  
+#   6-9: Raycast distances (left, right, up, down)
+#   10: Whether box can currently jump (0/1)
+#   11: Highest y-coordinate achieved this episode
+#   12: Time remaining (0 to 1)
+#
+# Additional dimensions if enabled:
+#   +1 if include_highest: false
+#   +1 if include_time: false  
+#   +num_boxes if agent_one_hot: true
+
+# === TRAINING TIPS ===
+# 1. Start with fixed_rotation=true for faster initial learning
+# 2. Use "highest" reward mode for pure cooperation
+# 3. Increase num_boxes gradually as performance improves
+# 4. Use render_mode="human" to watch training progress
+# 5. Higher similarity_loss_coef encourages more coordination
+# 6. Lower learning rates may be needed for larger num_boxes 

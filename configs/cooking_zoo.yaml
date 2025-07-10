@@ -1,3 +1,7 @@
+# Model loading (optional)
+# Set this to continue training from an existing model or for view.py
+load_model: null  # Example: "files/Models/cooking_zoo/best_model.pth"
+
 environment:
   name: cooking_zoo
   env_kwargs:
@@ -22,19 +26,26 @@ training:
   batch_size: 64
   min_learning_rate: 1e-6
   similarity_loss_coef: 0.2  # Higher for encouraging cooperation
+  num_parallel: 4  # Number of parallel environments (4 good for cooperative tasks)
 
-logging:
-  log_interval: 10
-  save_interval: 100
-  eval_interval: 50
-  save_best_model: true
-
+# Model Architecture
 model:
   num_heads: 4
   embedding_dim: 256
   hidden_size: 526
-  save_dir: "files/Models"
-  model_name: "TAAC_cooking_zoo"
+
+# Logging & Evaluation
+logging:
+  log_interval: 10      # Print stats every N episodes
+  save_interval: 100    # Save model every N episodes  
+  eval_interval: 50     # Evaluate model every N episodes
+  eval_episodes: 5      # Number of episodes for evaluation
+
+# Output Configuration
+output:
+  experiment_name: "cooking_zoo_experiment"
+  model_save_path: "files/Models/cooking_zoo/"
+  log_save_path: "experiments/cooking_zoo/"
 
 # Environment-specific notes:
 # - CookingZoo requires coordination between agents

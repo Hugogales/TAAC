@@ -6,26 +6,24 @@ pettingzoo>=1.24.0
 supersuit>=3.9.0
 
 # Environment-specific dependencies
-# CookingZoo (install separately if needed)
-# cooking_zoo  # Uncomment if available via pip
-
-# MPE environments (included with PettingZoo)
-# pettingzoo[mpe]  # Automatically included
-
-# Atari environments (optional)
-# pettingzoo[atari]
+# Standard PettingZoo environments
+# For additional environments, install as needed:
+# pip install 'pettingzoo[all]'  # All environments
+# pip install 'pettingzoo[atari]'  # Atari only
+# pip install 'pettingzoo[mpe]'  # MPE only
 
 # Additional utilities
 matplotlib>=3.5.0
 pyyaml>=6.0
-tensorboard>=2.10.0  # Optional for advanced logging
-tqdm>=4.64.0  # Progress bars
+tqdm>=4.64.0
+
+# BoxJump dependencies (only install if using BoxJump)
+# swig  # Required for BoxJump installation
+# Note: Install swig manually before installing BoxJump
 
 # Development dependencies (optional)
 jupyter>=1.0.0
 ipython>=8.0.0
 
-# Note: Some environments may require additional dependencies:
-# - BoxJump: Check specific requirements
-# - MATS Gym: Check specific requirements
-# - For GPU support: Install appropriate CUDA version of PyTorch 
+# Note: For BoxJump environment, check specific installation requirements
+# Note: For GPU support, install appropriate CUDA version of PyTorch 

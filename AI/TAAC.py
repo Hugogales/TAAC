@@ -64,6 +64,7 @@ class AttentionActorCriticNetwork(nn.Module):
                 nn.Linear(self.hidden_size, action_size)
             )
         else:  # continuous
+            # For multi-dimensional continuous actions, we need separate mean and std networks
             self.actor_mean = nn.Sequential(
                 nn.Linear(embedding_dim, self.hidden_size),
                 nn.LeakyReLU(),
@@ -71,7 +72,12 @@ class AttentionActorCriticNetwork(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(self.hidden_size, action_size)
             )
+            # Learnable log standard deviation for each action dimension
             self.actor_logstd = nn.Parameter(torch.zeros(action_size))
+            
+            # Optional: Action bounds for clamping (can be set externally)
+            self.action_low = -1.0  # Default bounds
+            self.action_high = 1.0
 
         # Critic network - input size depends on action space type
         critic_input_size = state_size + (action_size if action_space_type == "discrete" else action_size)
@@ -101,6 +107,10 @@ class AttentionActorCriticNetwork(nn.Module):
 
         print(f"Network created with {sum(p.numel() for p in self.parameters())} parameters")
         print(f"State size: {state_size}, Action size: {action_size}, Action type: {action_space_type}")
+        if action_space_type == "continuous":
+            print(f"Continuous action dimensions: {action_size}")
+            print(f"Actor mean output shape: [batch_size, num_agents, {action_size}]")
+            print(f"Actor std parameters: {action_size} learnable log-std values")
 
     def actor_forward(self, x):
         """
@@ -119,7 +129,7 @@ class AttentionActorCriticNetwork(nn.Module):
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
         
         if self.action_space_type == "discrete":
-            action_logits = self.actor_out(attn_output)
+            action_logits = self.actor_out(attn_output) # [B, N, action_size]
             action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
             return action_probs
         else:  # continuous
@@ -145,7 +155,6 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
-        action_probs = torch.softmax(self.actor_out(attn_output), dim=-1) # [B, N, action_size]
 
         # similarity loss 
         normalized_attn_output = attn_output / attn_output.norm(dim=-1, keepdim=True) # [B, N, embedding]
@@ -358,7 +367,9 @@ class TAAC:
             actions, log_probs, entropy
         """
         try:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            # Convert to numpy array first for efficiency, then to tensor
+            state_array = np.array(state, dtype=np.float32)
+            state_tensor = torch.from_numpy(state_array).unsqueeze(0).to(self.device)
             with torch.no_grad():
                 if self.action_space_type == "discrete":
                     action_probs = self.policy_old.actor_forward(state_tensor)
@@ -366,20 +377,37 @@ class TAAC:
                     action = dist.sample()
                     action_log_prob = dist.log_prob(action)
                     entropy = dist.entropy()
-                else:  # continuous
+                else:  # continuous - handles multi-dimensional actions
                     action_mean, action_std = self.policy_old.actor_forward(state_tensor)
+                    
+                    # Create distribution for each action dimension
                     dist = torch.distributions.Normal(action_mean, action_std)
                     raw_action = dist.sample()
+                    
                     # Apply tanh transformation for bounded actions [-1, 1]
                     action = torch.tanh(raw_action)
+                    
+                    # Scale to actual action bounds if needed
+                    if hasattr(self.policy_old, 'action_low') and hasattr(self.policy_old, 'action_high'):
+                        action_low = self.policy_old.action_low
+                        action_high = self.policy_old.action_high
+                        # Scale from [-1, 1] to [action_low, action_high]
+                        action = action_low + (action_high - action_low) * (action + 1) / 2
+                    
                     # Adjust log probabilities for tanh transformation
+                    # For multi-dimensional actions, sum over action dimensions
                     action_log_prob = dist.log_prob(raw_action).sum(dim=-1)
-                    action_log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1)
+                    action_log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1)
+                    
+                    # Entropy sum over action dimensions for multi-dimensional actions
                     entropy = dist.entropy().sum(dim=-1)
                     
         except ValueError as e:
             print(e)
             print(f"state tensor: {state_tensor}")
+            print(f"state tensor shape: {state_tensor.shape}")
+            if self.action_space_type == "continuous":
+                print(f"action_size: {self.action_size}")
             raise ValueError("Error in action selection")
 
         return action, action_log_prob, entropy
@@ -419,8 +447,8 @@ class TAAC:
                 rewards.append(self.memories[i+j].rewards)
                 dones.append(self.memories[i+j].dones)
             
-            # Convert lists to tensors and reshape
-            old_states = torch.FloatTensor(old_states).permute(1, 0, 2).to(self.device) # [B, N, state_size]
+            # Convert lists to tensors and reshape (optimize for performance)
+            old_states = torch.from_numpy(np.array(old_states, dtype=np.float32)).permute(1, 0, 2).to(self.device) # [B, N, state_size]
             
             # Handle different action types
             if self.action_space_type == "discrete":
@@ -448,7 +476,7 @@ class TAAC:
 
         # Concatenate experiences from all agents
         states = torch.cat(states, dim=0) # [B*G , N, state_size]
-        actions = torch.cat(actions, dim=0) # [B*G , N]
+        actions = torch.cat(actions, dim=0) # [B*G , N] for discrete, [B*G, N, action_size] for continuous
         log_probs = torch.cat(log_probs, dim=0) # [B*G , N]
         advantages = torch.cat(advantages, dim=0) # [B*G , N] 
         gae_returns = torch.cat(gae_returns, dim=0) # [B*G , N]
@@ -478,7 +506,7 @@ class TAAC:
 
                 # Slice the mini-batch
                 mini_states = states[start:end] # [mini_batch_size, N, state_size]
-                mini_actions = actions[start:end] # [mini_batch_size, N]
+                mini_actions = actions[start:end] # [mini_batch_size, N] for discrete, [mini_batch_size, N, action_size] for continuous
                 mini_log_probs = log_probs[start:end] # [mini_batch_size, N]
                 mini_advantages = advantages[start:end] # [mini_batch_size, N]
                 mini_gae_returns = gae_returns[start:end] # [mini_batch_size, N]
@@ -490,11 +518,13 @@ class TAAC:
                     dist = torch.distributions.Categorical(action_probs) # [mini_batch_size, N]
                     action_log_probs = dist.log_prob(mini_actions) # [mini_batch_size, N]
                     dist_entropy = dist.entropy() # [mini_batch_size, N]
-                else: # continuous
-                    (action_mean, action_std), similarity_loss = self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size], [mini_batch_size, N]
+                else: # continuous - multi-dimensional actions
+                    (action_mean, action_std), similarity_loss = self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size]
                     state_values_new = self.policy.critic_forward(mini_states, mini_actions) # [mini_batch_size, N]
-                    dist = torch.distributions.Normal(action_mean, action_std) # [mini_batch_size, N]
+                    dist = torch.distributions.Normal(action_mean, action_std) # Multi-dimensional normal distribution
+                    # For multi-dimensional actions, sum log probabilities across action dimensions
                     action_log_probs = dist.log_prob(mini_actions).sum(dim=-1) # [mini_batch_size, N]
+                    # For multi-dimensional actions, sum entropy across action dimensions  
                     dist_entropy = dist.entropy().sum(dim=-1) # [mini_batch_size, N]
                 
                 # Calculate the ratios
@@ -532,13 +562,15 @@ class TAAC:
                     dist = torch.distributions.Categorical(action_probs)
                     action_log_probs = dist.log_prob(mini_actions)
                     dist_entropy = dist.entropy()
-                else: # continuous
+                else: # continuous - multi-dimensional actions
                     (action_mean, action_std), similarity_loss = self.policy.actor_forward_update(mini_states)
                     state_values_new = self.policy.critic_forward(mini_states, mini_actions)
-                    dist = torch.distributions.Normal(action_mean, action_std)
+                    dist = torch.distributions.Normal(action_mean, action_std) # Multi-dimensional normal distribution
+                    # For multi-dimensional actions, sum log probabilities across action dimensions
                     action_log_probs = dist.log_prob(mini_actions).sum(dim=-1)
+                    # For multi-dimensional actions, sum entropy across action dimensions
                     dist_entropy = dist.entropy().sum(dim=-1)
-
+                
                 # Calculate the ratios
                 ratios = torch.exp(action_log_probs - mini_log_probs)
 
@@ -589,7 +621,8 @@ class TAAC:
         gae = 0
         for i in reversed(range(len(rewards))):
             if i == len(rewards) - 1:
-                next_value = 0 if dones[i] else baseline_values[i + 1]
+                # For the last timestep, next_value is always 0 (terminal state)
+                next_value = 0
             else:
                 next_value = baseline_values[i + 1]
             delta = rewards[i] + gamma * next_value * (1 - dones[i]) - baseline_values[i]
@@ -639,34 +672,94 @@ class TAAC:
             self.memories.append(Memory())
 
     
+    def set_action_bounds(self, action_low, action_high):
+        """
+        Set action bounds for continuous action spaces
+        
+        Args:
+            action_low: Lower bound for actions (scalar or array)
+            action_high: Upper bound for actions (scalar or array)
+        """
+        if self.action_space_type == "continuous":
+            self.policy.action_low = action_low
+            self.policy.action_high = action_high
+            self.policy_old.action_low = action_low
+            self.policy_old.action_high = action_high
+            print(f"Action bounds set: [{action_low}, {action_high}]")
+        else:
+            print("Warning: Action bounds only applicable for continuous action spaces")
+
+    def store_experience(self, states, actions, log_probs):
+        """
+        Store experience in memory for training
+        
+        Args:
+            states: List of states for each agent
+            actions: Actions tensor from select_action
+            log_probs: Log probabilities tensor from select_action
+        """
+        if self.mode != "train":
+            return
+            
+        # Convert tensors to appropriate format for storage
+        if self.action_space_type == "discrete":
+            # actions shape: [1, num_agents] -> convert to numpy
+            actions_np = actions.squeeze(0).cpu().numpy()
+        else:  # continuous - multi-dimensional actions
+            # actions shape: [1, num_agents, action_size] -> convert to numpy
+            actions_np = actions.squeeze(0).cpu().numpy()
+            
+        log_probs_np = log_probs.squeeze(0).cpu().numpy()
+        
+        # Store in memory for each agent
+        for i in range(self.number_of_agents):
+            self.memories[i].states.append(states[i])
+            
+            if self.action_space_type == "discrete":
+                self.memories[i].actions.append(actions_np[i])
+            else:  # continuous - store full action vector
+                self.memories[i].actions.append(actions_np[i])
+                
+            self.memories[i].log_probs.append(log_probs_np[i])
+
     def get_actions(self, states):
         """
-        Get actions for all agents given their states
+        Get actions for all agents given their states (used during training/testing)
         
         Args:
             states: List of states for each agent
             
         Returns:
-            actions: Dictionary mapping agent names to actions (PettingZoo format)
-            entropies: Entropy values for monitoring
+            Dictionary of actions for each agent, entropy dictionary
         """
-        actions_in, log_probs, entropies = self.select_action(states)
-        actions_in = actions_in.squeeze(0).cpu().numpy()
-        log_probs = log_probs.squeeze(0).cpu().numpy() 
-        entropies = entropies.squeeze(0).cpu().numpy()
+        actions, log_probs, entropies = self.select_action(states)
         
-        actions = {}
-        for i, state in enumerate(states):
-            if self.mode == "train":
-                self.memories[i].states.append(state)
-                self.memories[i].actions.append(actions_in[i])
-                self.memories[i].log_probs.append(log_probs[i])
-
-            # Return actions in the format expected by the environment
-            # For PettingZoo, we'll return the raw action values
-            actions[f"agent_{i}"] = actions_in[i]
-            
-        return actions, entropies
+        # Store experience for training
+        if self.mode == "train":
+            self.store_experience(states, actions, log_probs)
+        
+        # Convert to dictionary format expected by environment
+        action_dict = {}
+        entropy_dict = {}
+        
+        # Handle different tensor shapes for discrete vs continuous actions
+        if self.action_space_type == "discrete":
+            # actions shape: [1, num_agents]
+            for i in range(self.number_of_agents):
+                action_dict[f"agent_{i}"] = actions[0, i].item()
+                entropy_dict[f"agent_{i}"] = entropies[0, i].item()
+        else:  # continuous - multi-dimensional actions
+            # actions shape: [1, num_agents, action_size]
+            for i in range(self.number_of_agents):
+                if self.action_size == 1:
+                    # Single dimensional action
+                    action_dict[f"agent_{i}"] = actions[0, i, 0].item()
+                else:
+                    # Multi-dimensional action - return as numpy array
+                    action_dict[f"agent_{i}"] = actions[0, i].detach().cpu().numpy()
+                entropy_dict[f"agent_{i}"] = entropies[0, i].item()
+        
+        return action_dict, entropy_dict
     
 
     def store_rewards(self, rewards, done):

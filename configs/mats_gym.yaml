@@ -1,3 +1,7 @@
+# Model loading (optional)
+# Set this to continue training from an existing model or for view.py
+load_model: null  # Example: "files/Models/mats_gym/best_model.pth"
+
 environment:
   name: mats_gym
   env_kwargs:
@@ -22,19 +26,26 @@ training:
   batch_size: 96
   min_learning_rate: 1e-6
   similarity_loss_coef: 0.15
+  num_parallel: 3  # Number of parallel environments (3 for complex traffic scenarios)
 
-logging:
-  log_interval: 25
-  save_interval: 250
-  eval_interval: 100
-  save_best_model: true
-
+# Model Architecture
 model:
   num_heads: 6
   embedding_dim: 384
   hidden_size: 768
-  save_dir: "files/Models"
-  model_name: "TAAC_mats_gym"
+
+# Logging & Evaluation
+logging:
+  log_interval: 25      # Print stats every N episodes
+  save_interval: 250    # Save model every N episodes  
+  eval_interval: 100    # Evaluate model every N episodes
+  eval_episodes: 5      # Number of episodes for evaluation
+
+# Output Configuration
+output:
+  experiment_name: "mats_gym_experiment"
+  model_save_path: "files/Models/mats_gym/"
+  log_save_path: "experiments/mats_gym/"
 
 # Environment-specific notes:
 # - MATS Gym focuses on multi-agent coordination in traffic scenarios
