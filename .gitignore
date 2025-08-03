@@ -33,12 +33,14 @@ MANIFEST
 *.pt
 
 # Training outputs
-files/
-experiments/
-logs/
-runs/
-checkpoints/
-models/
+files/*
+files/Models/*
+files/Models/*
+*experiments/*
+*logs/
+*runs/
+*checkpoints/
+*models/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -100,7 +102,6 @@ env.bak/
 venv.bak/
 
 # Jobs for slurm
-jobs/
 jobs/*
 
 # profiler
