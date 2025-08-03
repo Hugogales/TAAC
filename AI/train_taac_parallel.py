@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Single Environment Training script for TAAC algorithm
-Adapted from the provided training structure
+Parallel Environment Training script for TAAC algorithm
+Adapted from the provided parallel training structure with multiprocessing
 """
 
 import yaml
@@ -9,14 +9,16 @@ import argparse
 import os
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
+import torch.multiprocessing as mp
+import multiprocessing as mp_base
 from typing import Dict, Any, List, Tuple, Optional
 import time
 from datetime import datetime
 import json
 import pygame
-from tqdm import tqdm, trange
+from tqdm import tqdm
 import math
+from functools import partial
 
 from .TAAC import TAAC
 from .env_wrapper import TAACEnvironmentWrapper, create_env_config
@@ -82,9 +84,20 @@ def normalize_entropy(entropy_dict: Dict[str, float], num_actions: int) -> float
     return max(0.0, min(1.0, normalized))
 
 
-def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
-                   max_steps: int, logger: TAACLogger, env_name: str) -> Tuple[float, int, float, Dict[str, Any]]:
-    """Run a single game episode and return metrics"""
+def run_single_game_parallel(args):
+    """Run a single game in parallel environment (for multiprocessing)"""
+    if len(args) == 5:
+        (train_model, gpu_id, env_name, env_kwargs, max_steps) = args
+    else:
+        (train_model, env_name, env_kwargs, max_steps) = args
+        gpu_id = None
+    
+    # Set device for this process
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() and gpu_id is not None else "cpu")
+    train_model.assign_device(device) if hasattr(train_model, 'assign_device') else None
+    
+    # Create environment for this process
+    env_wrapper = TAACEnvironmentWrapper(env_name, **env_kwargs)
     
     # Reset environment
     states, info = env_wrapper.reset()
@@ -101,17 +114,17 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
     all_infos = []
     
     while not done and step_count < max_steps:
-        # Get actions from both models
+        # Get actions from training model
         train_actions, train_log_probs, train_entropies = train_model.get_actions(states)
         
         # Collect entropies for logging (every 10 steps to reduce noise)
         if step_count % 10 == 0:
             episode_entropies.append(train_entropies)
         
-        # Step environment with training model actions
+        # Step environment
         next_states, rewards, done, env_info = env_wrapper.step(train_actions)
         
-        # Store rewards and states for metrics
+        # Store rewards and states for metrics (experience storage happens in get_actions)
         train_model.store_rewards(rewards, done)
         all_states.append(next_states)
         all_rewards.append(rewards)
@@ -144,12 +157,17 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
     
     env_metrics = extract_environment_metrics(env_name, final_states, final_rewards, final_info, all_states_history=all_states)
     
-    return episode_reward, normalized_entropy, env_metrics
+    # Close environment
+    env_wrapper.close()
+    
+    # Get model memories for combining later
+    memories = train_model.memories if hasattr(train_model, 'memories') else []
+    
+    return (episode_reward, normalized_entropy, env_metrics), memories
 
-
-def train_taac(config: Dict[str, Any]) -> TAAC:
+def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> TAAC:
     """
-    Main training loop for TAAC algorithm (single environment)
+    Main training loop for TAAC algorithm (parallel environments)
     """
     # Setup paths and logging
     env_name = config['environment']['name']
@@ -162,20 +180,21 @@ def train_taac(config: Dict[str, Any]) -> TAAC:
     # Initialize pygame for potential rendering
     pygame.init()
     
-    print(f"=> Starting TAAC Training")
+    print(f"=> Starting TAAC Parallel Training")
     print(f"Environment: {env_name}")
     print(f"Job Name: {actual_job_name}")
     print(f"Training episodes: {config['training']['episodes']}")
+    print(f"Parallel games: {num_parallel_games}")
     
-    # Create environment
-    env_wrapper = TAACEnvironmentWrapper(
+    # Create sample environment to get info
+    sample_env = TAACEnvironmentWrapper(
         env_name, 
         apply_wrappers=config['environment'].get('apply_wrappers', True),
         **config['environment'].get('env_kwargs', {})
     )
     
     # Environment info
-    env_config = env_wrapper.env_info
+    env_config = sample_env.env_info
     training_config = config['training'].copy()
     
     # Merge model configuration
@@ -198,6 +217,9 @@ def train_taac(config: Dict[str, Any]) -> TAAC:
         else:
             print(f"=> Failed to load model from: {config['load_model']}")
     
+    # Close sample environment
+    sample_env.close()
+    
     # Training parameters
     episodes = training_config['episodes']
     max_steps = training_config.get('max_steps_per_episode', 500)
@@ -208,52 +230,84 @@ def train_taac(config: Dict[str, Any]) -> TAAC:
     logger = TAACLogger(env_name, actual_job_name)
     
     # Training variables
+    best_score = float('-inf')
     start_time = time.time()
     
-    print(f"\n=> Starting training for {episodes} episodes...")
+    print(f"\n=> Starting parallel training for {episodes} episodes...")
     
-    # Training loop with progress bar
-    for epoch in tqdm(range(episodes), desc="Training TAAC"):
-        
-        
-        # Run single game episode
-        episode_reward, normalized_entropy, env_metrics = run_single_game(
-            train_model, env_wrapper, max_steps, logger, env_name
-        )
-        
-        # Update the model
-        similarity_loss = train_model.update()
-        
-        # Log episode results
-        logger.log_episode(
-            total_reward=episode_reward,
-            entropy=normalized_entropy,
-            similarity_loss=similarity_loss,
-            env_metrics=env_metrics
-        )
-        
-        # Progress reporting
-        if (epoch + 1) % log_interval == 0:
-            logger.print_progress_report(epoch + 1, episodes, log_interval)
-        
-        # Save checkpoint
-        if (epoch + 1) % save_interval == 0:
-            checkpoint_path = os.path.join(save_dir, f"{actual_job_name}_ep{epoch + 1}.pth")
-            train_model.save_model(checkpoint_path)
+    # Create the pool once, outside the training loop
+    with mp_base.Pool(processes=num_parallel_games) as pool:
+        for epoch in tqdm(range(episodes), desc="Training TAAC Parallel"):
+            
+            # Prepare arguments for parallel games
+            if torch.cuda.is_available():
+                args_list = [
+                    (train_model,
+                     i % torch.cuda.device_count(), env_name, config['environment'].get('env_kwargs', {}), max_steps)
+                    for i in range(num_parallel_games)
+                ]
+            else:
+                args_list = [
+                    (train_model, env_name, config['environment'].get('env_kwargs', {}), max_steps)
+                    for i in range(num_parallel_games)
+                ]
+            
+            # Run parallel games
+            results = pool.map(run_single_game_parallel, args_list)
+            
+            # Combine results
+            combined_memories = []
+            parallel_rewards = []
+            parallel_entropies = []
+            parallel_env_metrics = []
+            
+            for (metrics, memories) in results:
+                episode_reward, normalized_entropy, env_metrics = metrics
+                
+                parallel_rewards.append(episode_reward)
+                parallel_entropies.append(normalized_entropy)
+                parallel_env_metrics.append(env_metrics)
+                
+                # Combine memories from all parallel runs
+                if hasattr(memories, '__iter__'):
+                    combined_memories.extend(memories)
+                else:
+                    combined_memories.append(memories)
+            
+            # Set combined memories back to the training model
+            if hasattr(train_model, 'memories') and combined_memories:
+                train_model.memories = combined_memories
+            
+            # Update the model with combined experiences
+            similarity_loss = train_model.update()
+            
+            # Log parallel episode results
+            logger.log_parallel_episodes(
+                rewards=parallel_rewards,
+                entropies=parallel_entropies,
+                similarity_losses=[similarity_loss] * len(parallel_rewards),
+                env_metrics_list=parallel_env_metrics
+            )
+            
+            # Progress reporting
+            if (epoch + 1) % log_interval == 0:
+                logger.print_progress_report(epoch + 1, episodes, log_interval)
+            
+            # Save checkpoint
+            if (epoch + 1) % save_interval == 0:
+                checkpoint_path = os.path.join(save_dir, f"{actual_job_name}_ep{epoch + 1}.pth")
+                train_model.save_model(checkpoint_path)
     
     # Save final model
     final_model_path = os.path.join(save_dir, f"{actual_job_name}_final.pth")
     train_model.save_model(final_model_path)
-    
-    # Close environment
-    env_wrapper.close()
     
     # Save final statistics
     logger.save_stats(log_dir, final_model_path=final_model_path)
     
     # Training complete
     total_time = time.time() - start_time
-    print(f"\n=> Training Complete!")
+    print(f"\n=> Parallel Training Complete!")
     print(f"Total Time: {format_time(total_time)}")
     print(f"Final Model: {final_model_path}")
     

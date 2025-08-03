@@ -1,28 +1,30 @@
-import gymnasium as gym
+import os
+import sys
+import importlib
 import numpy as np
-from pettingzoo import ParallelEnv
+from typing import Dict, List, Any, Tuple, Optional
+from pettingzoo.utils.env import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 from supersuit import pad_observations_v0, pad_action_space_v0
-import importlib
-import sys
-import os
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from pettingzoo.utils.env import ParallelEnv
+from supersuit.utils.base_aec_wrapper import BaseWrapper
 
 
-# Add environments directory to path for environment imports
-ENVIRONMENTS_DIR = Path(__file__).parent.parent / "environments"
-if ENVIRONMENTS_DIR.exists() and str(ENVIRONMENTS_DIR) not in sys.path:
-    sys.path.append(str(ENVIRONMENTS_DIR))
+# Add the environments directory to Python path to ensure proper imports
+ENVIRONMENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "environments")
+if os.path.exists(ENVIRONMENTS_DIR) and ENVIRONMENTS_DIR not in sys.path:
+    sys.path.append(ENVIRONMENTS_DIR)
+    print(f"Added environments directory to path: {ENVIRONMENTS_DIR}")
 
 
 def make_env(env_name: str, **kwargs) -> ParallelEnv:
     """
-    Create a PettingZoo environment by name
+    Create environment by name with appropriate wrappers.
     
     Args:
-        env_name: Environment name (e.g., 'cooking_zoo', 'boxjump', 'mats_gym')
-        **kwargs: Additional environment parameters
+        env_name: Name of the environment
+        **kwargs: Additional arguments to pass to the environment
         
     Returns:
         PettingZoo parallel environment
@@ -31,10 +33,10 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
         try:
             # Try to import from environments directory first
             try:
-                from environments.cooking_zoo.environment import parallel_env
+                from environments.cooking_zoo import parallel_env
             except ImportError:
                 # Fall back to regular import if not found in environments directory
-                from cooking_zoo.environment import parallel_env
+                from cooking_zoo import parallel_env
             return parallel_env(**kwargs)
         except ImportError:
             raise ImportError(
@@ -48,13 +50,26 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
         try:
             # Try to import from environments directory first
             try:
-                from environments.boxjump.box_env import BoxJumpEnvironment
+                # Ensure environments directory is in path
+                if ENVIRONMENTS_DIR not in sys.path:
+                    sys.path.append(ENVIRONMENTS_DIR)
+                    
+                # First try direct import from environments subdirectory
+                sys.path.append(os.path.join(ENVIRONMENTS_DIR, "boxjump"))
+                from box_env import BoxJumpEnvironment
+                print("Found BoxJump in environments/boxjump directory")
             except ImportError:
-                # Fall back to regular import if not found in environments directory
-                from boxjump.box_env import BoxJumpEnvironment
+                try:
+                    # Try with explicit path
+                    from environments.boxjump.box_env import BoxJumpEnvironment
+                except ImportError:
+                    # Fall back to regular import if not found in environments directory
+                    from boxjump.box_env import BoxJumpEnvironment
+            
             # BoxJump uses custom environment class, need to wrap it
             return _wrap_boxjump_env(**kwargs)
-        except ImportError:
+        except ImportError as e:
+            print(f"BoxJump import error details: {str(e)}")
             raise ImportError(
                 "BoxJump not installed. Install with:\n"
                 "cd environments\n"
@@ -90,7 +105,7 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
                 'simple_world_comm': simple_world_comm_v3
             }
             if env_type in env_map:
-                # MPE environments support continuous_actions parameter
+                # Force discrete actions for MPE environments
                 return env_map[env_type].parallel_env(**kwargs)
             else:
                 raise ValueError(f"Unknown MPE environment: {env_type}")
@@ -122,10 +137,20 @@ def _wrap_boxjump_env(**kwargs) -> ParallelEnv:
     """
     # Try to import from environments directory first
     try:
-        from environments.boxjump.box_env import BoxJumpEnvironment
+        # Try with explicit environments path
+        if ENVIRONMENTS_DIR not in sys.path:
+            sys.path.append(ENVIRONMENTS_DIR)
+            
+        # First try direct import from environments subdirectory
+        sys.path.append(os.path.join(ENVIRONMENTS_DIR, "boxjump"))
+        from box_env import BoxJumpEnvironment
     except ImportError:
-        # Fall back to regular import if not found in environments directory
-        from boxjump.box_env import BoxJumpEnvironment
+        try:
+            # Try with module path
+            from environments.boxjump.box_env import BoxJumpEnvironment
+        except ImportError:
+            # Fall back to regular import if not found in environments directory
+            from boxjump.box_env import BoxJumpEnvironment
     
     # Convert PettingZoo parameters to BoxJump parameters
     boxjump_kwargs = kwargs.copy()
@@ -139,62 +164,41 @@ def _wrap_boxjump_env(**kwargs) -> ParallelEnv:
     
     # Convert to PettingZoo parallel environment
     # BoxJump should already be compatible, but we may need custom wrapper
-    class BoxJumpParallelWrapper:
+    # This wrapper is needed because BoxJump doesn't follow the PettingZoo Parallel API precisely.
+    # It correctly returns a dict for observations, rewards, etc., but its `step` method
+    # returns 5 values instead of 4, and it lacks some metadata attributes.
+    class BoxJumpParallelWrapper(ParallelEnv):
         def __init__(self, env):
             self.env = env
-            # Create agent names in BoxJump format (box-1, box-2, etc.)
-            self.agents = [f"box-{i+1}" for i in range(env.num_boxes)]
-            self.possible_agents = self.agents[:]
-            
+            # PettingZoo API requirements
+            self.possible_agents = [f"box-{i+1}" for i in range(env.num_boxes)]
+            self.agents = self.possible_agents[:]
+            self.metadata = getattr(env, 'metadata', {'render_modes': ['human'], 'name': "boxjump_v0"})
+
         def reset(self, seed=None, options=None):
             # BoxJump reset returns (observations_dict, info_dict) tuple
-            result = self.env.reset()
-            
-            # Handle both tuple and dict return formats
-            if isinstance(result, tuple):
-                obs, info = result
+            result = self.env.reset(seed=seed, options=options)
+            if isinstance(result, tuple) and len(result) == 2:
+                observations_dict, info_dict = result
+                self.agents = list(observations_dict.keys())
+                return observations_dict, info_dict
             else:
-                obs = result
-                info = {}
-            
-            # BoxJump returns observations in format: {'box-1': array, 'box-2': array, ...}
-            # Map to our agent format: {'box-1': array, 'box-2': array, ...}
-            observations = {}
-            
-            for i, agent in enumerate(self.agents):
-                box_name = f"box-{i+1}"  # BoxJump uses 1-indexed box names
-                
-                # BoxJump directly provides observations by box name
-                if box_name in obs:
-                    observations[agent] = obs[box_name]
-                else:
-                    # Fallback: create zero observation
-                    observations[agent] = np.zeros(13, dtype=np.float32)
-                    
-            infos = {agent: {} for agent in self.agents}
-            return observations, infos
-            
+                # Handle cases where reset might not return info dict
+                observations_dict = result
+                self.agents = list(observations_dict.keys())
+                return observations_dict, {}
+
         def step(self, actions):
             # BoxJump expects actions as dict with box names as keys
             # actions input: {'box-1': 0, 'box-2': 1, 'box-3': 2, 'box-4': 3}
             # BoxJump returns 5 values: obs, rewards, terminations, truncations, infos
             obs, rewards, terminations, truncations, infos = self.env.step(actions)
             
-            # Convert to dict format, BoxJump directly provides observations by box name
-            observations = {}
+            # Combine terminations and truncations into a single `dones` dict
+            dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) for agent in self.agents}
             
-            for i, agent in enumerate(self.agents):
-                box_name = f"box-{i+1}"  # BoxJump uses 1-indexed box names
-                
-                # BoxJump directly provides observations by box name
-                if box_name in obs:
-                    observations[agent] = obs[box_name]
-                else:
-                    # Fallback: create zero observation
-                    observations[agent] = np.zeros(13, dtype=np.float32)
-            
-            # BoxJump already returns dict format, just pass through
-            return observations, rewards, terminations, truncations, infos
+            # The PettingZoo API expects 4 return values, so we pass back dones instead of terminations/truncations
+            return obs, rewards, dones, infos
             
         def observation_space(self, agent):
             # BoxJump observation_space takes an agent argument
@@ -230,6 +234,12 @@ def extract_env_info(env: ParallelEnv) -> Dict[str, Any]:
     Returns:
         Dictionary with environment specifications
     """
+    if not isinstance(env, (ParallelEnv, BaseWrapper)):
+        raise TypeError(f"Expected a PettingZoo ParallelEnv, but got {type(env)}")
+        
+    # Get a sample agent
+    sample_agent = env.possible_agents[0]
+    
     # Reset environment to get initial observations
     observations, _ = env.reset()
     
@@ -258,12 +268,8 @@ def extract_env_info(env: ParallelEnv) -> Dict[str, Any]:
         # Discrete action space
         action_space_type = 'discrete'
         action_size = action_space.n
-    elif hasattr(action_space, 'shape'):
-        # Continuous action space
-        action_space_type = 'continuous'
-        action_size = action_space.shape[0] if action_space.shape else 1
     else:
-        raise ValueError(f"Unsupported action space type: {type(action_space)}")
+        raise ValueError(f"Unsupported action space type: {type(action_space)}. Only discrete action spaces are supported.")
     
     return {
         'num_agents': num_agents,
@@ -384,14 +390,21 @@ class TAACEnvironmentWrapper:
                 action_key = f"agent_{i}"
                 if action_key in actions:
                     action = actions[action_key]
-                    # Handle different action types
-                    if self.env_info['action_space_type'] == 'discrete':
-                        env_actions[agent] = int(action)
-                    else:
-                        env_actions[agent] = np.array(action)
+                    # Convert to int for discrete actions
+                    env_actions[agent] = int(action)
         
-        # Step environment
-        observations, rewards, terminations, truncations, info = self.env.step(env_actions)
+        # Environment-specific step handling to ensure 4-value returns
+        if self.env_name == 'boxjump':
+            observations, rewards, dones, info = self._step_boxjump(env_actions)
+        elif self.env_name.startswith('mpe_'):
+            observations, rewards, dones, info = self._step_mpe(env_actions)
+        elif self.env_name == 'cooking_zoo':
+            observations, rewards, dones, info = self._step_cooking_zoo(env_actions)
+        elif self.env_name == 'mats_gym':
+            observations, rewards, dones, info = self._step_mats_gym(env_actions)
+        else:
+            # Default handling for unknown environments
+            observations, rewards, dones, info = self._step_default(env_actions)
         
         # Convert to TAAC format
         states = []
@@ -403,43 +416,150 @@ class TAACEnvironmentWrapper:
                 
                 # Handle dict observations (from BoxJump)
                 if isinstance(obs, dict):
-                    # Find the first valid numpy array in the dict
-                    valid_obs = None
-                    for key, value in obs.items():
-                        if isinstance(value, np.ndarray) and value.size > 0:
-                            valid_obs = value
-                            break
-                    if valid_obs is not None:
-                        obs = valid_obs
+                    # Convert dict to array if needed
+                    if 'observation' in obs:
+                        obs = obs['observation']
                     else:
-                        # Fallback to zero array
-                        obs = np.zeros(self.env_info['state_size'], dtype=np.float32)
+                        # Flatten dict values
+                        obs = np.concatenate([np.atleast_1d(v) for v in obs.values()])
                 
-                # Ensure obs is a proper numpy array and flatten if multi-dimensional
+                # Ensure observation is numpy array
                 if not isinstance(obs, np.ndarray):
-                    obs = np.array(obs)
-                
-                # Ensure we have at least 1D array
-                if obs.ndim == 0:
-                    obs = obs.reshape(-1)
-                elif obs.ndim > 1:
-                    obs = obs.flatten()
-                    
-                # Ensure proper dtype
-                if obs.dtype == object:
-                    obs = obs.astype(np.float32)
+                    obs = np.array(obs, dtype=np.float32)
                     
                 states.append(obs)
-                reward_list.append(rewards.get(agent, 0.0))
             else:
                 # Handle terminated agents
                 states.append(np.zeros(self.env_info['state_size']))
+                
+        # Handle rewards - convert to list in agent order for TAAC compatibility
+        for i, agent in enumerate(self.agents):
+            if agent in rewards:
+                reward_list.append(float(rewards[agent]))
+            else:
                 reward_list.append(0.0)
         
-        # Check if episode is done (all agents terminated or truncated)
-        done = all(terminations.values()) or all(truncations.values())
+        # Check if episode is done (all agents done or any agent done depending on environment)
+        if isinstance(dones, dict):
+            # For most environments, episode is done when all agents are done
+            done = all(dones.values()) if dones else False
+        else:
+            # Handle boolean done
+            done = bool(dones)
         
         return states, reward_list, done, info
+    
+    def _step_boxjump(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
+        """Step method specifically for BoxJump environment"""
+        try:
+            # Call the BoxJump environment directly without converters
+            result = self.original_env.step(env_actions)
+            
+            if len(result) == 4:
+                # BoxJump returns 4 values: observations, rewards, dones, info
+                observations, rewards, dones, info = result
+                return observations, rewards, dones, info
+            elif len(result) == 5:
+                # Handle 5-value return by combining terminations and truncations
+                observations, rewards, terminations, truncations, info = result
+                dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
+                        for agent in observations.keys()}
+                return observations, rewards, dones, info
+            else:
+                raise ValueError(f"BoxJump returned unexpected number of values: {len(result)}")
+                
+        except Exception as e:
+            print(f"Error in BoxJump step, falling back to wrapped environment: {e}")
+            # Fallback to wrapped environment
+            return self._step_default(env_actions)
+    
+    def _step_mpe(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
+        """Step method specifically for MPE environments"""
+        try:
+            # MPE environments typically return 5 values with newer PettingZoo
+            result = self.env.step(env_actions)
+            
+            if len(result) == 4:
+                observations, rewards, dones, info = result
+                return observations, rewards, dones, info
+            elif len(result) == 5:
+                observations, rewards, terminations, truncations, info = result
+                # Combine terminations and truncations into dones
+                dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
+                        for agent in observations.keys()}
+                return observations, rewards, dones, info
+            else:
+                raise ValueError(f"MPE returned unexpected number of values: {len(result)}")
+                
+        except Exception as e:
+            print(f"Error in MPE step: {e}")
+            raise
+    
+    def _step_cooking_zoo(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
+        """Step method specifically for CookingZoo environment"""
+        try:
+            result = self.env.step(env_actions)
+            
+            if len(result) == 4:
+                observations, rewards, dones, info = result
+                return observations, rewards, dones, info
+            elif len(result) == 5:
+                observations, rewards, terminations, truncations, info = result
+                dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
+                        for agent in observations.keys()}
+                return observations, rewards, dones, info
+            else:
+                raise ValueError(f"CookingZoo returned unexpected number of values: {len(result)}")
+                
+        except Exception as e:
+            print(f"Error in CookingZoo step: {e}")
+            raise
+    
+    def _step_mats_gym(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
+        """Step method specifically for MATS Gym environment"""
+        try:
+            result = self.env.step(env_actions)
+            
+            if len(result) == 4:
+                observations, rewards, dones, info = result
+                return observations, rewards, dones, info
+            elif len(result) == 5:
+                observations, rewards, terminations, truncations, info = result
+                dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
+                        for agent in observations.keys()}
+                return observations, rewards, dones, info
+            else:
+                raise ValueError(f"MATS Gym returned unexpected number of values: {len(result)}")
+                
+        except Exception as e:
+            print(f"Error in MATS Gym step: {e}")
+            raise
+    
+    def _step_default(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
+        """Default step method for unknown environments"""
+        try:
+            result = self.env.step(env_actions)
+            
+            if len(result) == 4:
+                observations, rewards, dones, info = result
+                return observations, rewards, dones, info
+            elif len(result) == 5:
+                observations, rewards, terminations, truncations, info = result
+                dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
+                        for agent in observations.keys()}
+                return observations, rewards, dones, info
+            else:
+                # Try to handle other cases gracefully
+                print(f"Warning: Environment returned {len(result)} values, expected 4 or 5")
+                if len(result) >= 4:
+                    observations, rewards, dones, info = result[:4]
+                    return observations, rewards, dones, info
+                else:
+                    raise ValueError(f"Environment returned too few values: {len(result)}")
+                    
+        except Exception as e:
+            print(f"Error in default step method: {e}")
+            raise
     
     def close(self):
         """Close the environment"""

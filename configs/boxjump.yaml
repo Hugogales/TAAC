@@ -5,6 +5,7 @@
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
 load_model: null  # Example: "files/Models/boxjump/best_model.pth"
+job_name: "boxjump_test"
 
 environment:
   name: "boxjump"
@@ -41,7 +42,8 @@ environment:
     agent_one_hot: false            # Include agent ID as one-hot vector in observations
     
     # === RENDERING ===
-    render_mode: null                  # null = no rendering (training), "human" = PyGame window
+    render_mode: "human"                   # null = no rendering (training), "human" = PyGame window
+    #render_mode: null                   # null = no rendering (training), "human" = PyGame window
     
   apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
 
@@ -61,13 +63,13 @@ training:
   epsilon_clip: 0.2                 # PPO clipping parameter
   K_epochs: 10                       # PPO update epochs per batch
   c_entropy: 0.05                   # Entropy coefficient for exploration
-  max_grad_norm: 20               # Gradient clipping norm
+  max_grad_norm: 200               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.97                         # GAE lambda parameter
-  batch_size: 128                    # Training batch size (very small for stability)
+  batch_size: 512                    # Training batch size (very small for stability)
   min_learning_rate: 0.0001       # Minimum learning rate for scheduler
   similarity_loss_coef: 0.0         # Cooperation loss (higher = more coordinated behavior)
-  num_parallel: 1                   # Number of parallel environments (1 = single env, 4+ = parallel training)
+  num_parallel: 4                   # Number of parallel environments (1 = single env, 4+ = parallel training)
 
 # Logging & Evaluation
 logging:

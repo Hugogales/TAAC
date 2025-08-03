@@ -1,194 +1,48 @@
 #!/usr/bin/env python3
 """
-TAAC Model Viewer - Load and Display Trained Models
+TAAC Model Viewer Script - Main Entry Point for Model Visualization
+
+This script is the main entry point for viewing trained TAAC models.
+It routes to the core viewing functionality in AI/model_viewer.py.
 
 Usage:
+    # View model using config's load_model field
     python scripts/view.py --config configs/boxjump.yaml
-    python scripts/view.py --config configs/mpe_simple_spread.yaml --model_path files/Models/mpe/best_model.pth
-    python scripts/view.py --config configs/boxjump.yaml --episodes 5
+    
+    # View specific model
+    python scripts/view.py --config configs/boxjump.yaml --model_path files/Models/boxjump/best_model.pth
+    
+    # View with custom settings
+    python scripts/view.py --config configs/mpe_simple_spread.yaml --episodes 3 --render_delay 0.01
+    
+    # Non-interactive mode (auto-play)
+    python scripts/view.py --config configs/cooking_zoo.yaml --non_interactive
 """
 
-import argparse
-import yaml
-import os
 import sys
-import time
-import torch
-from pathlib import Path
+import os
+import argparse
+import traceback
 
-# Add AI directory to path
-sys.path.append(str(Path(__file__).parent.parent / "AI"))
+# Add the project root to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from TAAC import TAAC
-from env_wrapper import TAACEnvironmentWrapper
-
-
-def load_config(config_path):
-    """Load and validate configuration file."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Validate required sections
-    required_sections = ['environment', 'training']
-    for section in required_sections:
-        if section not in config:
-            raise ValueError(f"Missing required config section: {section}")
-    
-    return config
-
-
-def find_model_path(config, provided_path):
-    """Find the model path from config or provided path."""
-    if provided_path:
-        return provided_path
-    
-    # Check if load_model is specified in config
-    if 'load_model' in config and config['load_model']:
-        return config['load_model']
-    
-    # Try to find a model in the default location
-    env_name = config['environment']['name']
-    default_paths = [
-        f"files/Models/{env_name}/best_model.pth",
-        f"files/Models/{env_name}/final_model.pth",
-        f"files/Models/TAAC_{env_name}_final.pth",
-        f"files/Models/{env_name}_taac_final.pth"
-    ]
-    
-    for path in default_paths:
-        if os.path.exists(path):
-            print(f"=> Found model at: {path}")
-            return path
-    
-    raise FileNotFoundError(f"No model found. Tried: {default_paths}")
-
-
-def load_model(model_path, env_wrapper):
-    """Load the trained TAAC model."""
-    print(f"=> Loading model from: {model_path}")
-    
-    # Get environment specs
-    state_size = env_wrapper.state_size
-    action_size = env_wrapper.action_size
-    action_type = env_wrapper.action_type
-    num_agents = env_wrapper.num_agents
-    
-    print(f"Environment specs:")
-    print(f"  - Agents: {num_agents}")
-    print(f"  - State size: {state_size}")
-    print(f"  - Action size: {action_size}")
-    print(f"  - Action type: {action_type}")
-    
-    # Create TAAC agent
-    taac_agent = TAAC(
-        state_size=state_size,
-        action_size=action_size,
-        action_type=action_type,
-        num_agents=num_agents
-    )
-    
-    # Load the saved model
-    checkpoint = torch.load(model_path, map_location='cpu')
-    if 'actor_state_dict' in checkpoint:
-        taac_agent.actor_critic.load_state_dict(checkpoint['actor_state_dict'])
-    else:
-        # Try to load direct state dict
-        taac_agent.actor_critic.load_state_dict(checkpoint)
-    
-    print(f"=> Model loaded successfully!")
-    return taac_agent
-
-
-def run_visualization(config, model_path, episodes=5, render_delay=0.05):
-    """Run the visualization with the trained model."""
-    # Setup environment
-    env_name = config['environment']['name']
-    env_kwargs = config['environment'].get('env_kwargs', {})
-    
-    # Force rendering mode
-    env_kwargs['render_mode'] = 'human'
-    
-    print(f"=> Creating environment: {env_name}")
-    env_wrapper = TAACEnvironmentWrapper(env_name, **env_kwargs)
-    
-    # Load model
-    taac_agent = load_model(model_path, env_wrapper)
-    
-    print(f"\n=> Starting visualization for {episodes} episodes...")
-    print(f"=> Press Ctrl+C to stop early")
-    
-    try:
-        for episode in range(episodes):
-            print(f"\n=== Episode {episode + 1}/{episodes} ===")
-            
-            # Reset environment
-            states = env_wrapper.reset()
-            episode_reward = 0
-            step_count = 0
-            done = False
-            
-            while not done and step_count < 1000:  # Max steps per episode
-                # Get actions from trained agent
-                actions, _ = taac_agent.get_actions(states)
-                
-                # Step environment
-                next_states, rewards, done, info = env_wrapper.step(actions)
-                
-                # Accumulate rewards
-                total_reward = sum(rewards.values()) if isinstance(rewards, dict) else sum(rewards)
-                episode_reward += total_reward
-                
-                # Extract height info for BoxJump
-                height_info = ""
-                if env_name == 'boxjump' and hasattr(env_wrapper, 'get_current_height'):
-                    try:
-                        current_height = env_wrapper.get_current_height()
-                        if current_height is not None:
-                            height_info = f", Height: {current_height:.2f}"
-                    except:
-                        pass
-                
-                # Print step info periodically
-                if step_count % 50 == 0:
-                    print(f"  Step {step_count}: Reward: {total_reward:.3f}{height_info}")
-                
-                states = next_states
-                step_count += 1
-                
-                # Control visualization speed
-                time.sleep(render_delay)
-            
-            print(f"  Episode complete: Total Reward: {episode_reward:.2f}, Steps: {step_count}")
-            print(f"  Press Enter to continue to next episode, or Ctrl+C to exit...")
-            
-            # Wait for user input before next episode
-            try:
-                input()
-            except KeyboardInterrupt:
-                print(f"\n=> Visualization stopped by user")
-                break
-    
-    except KeyboardInterrupt:
-        print(f"\n=> Visualization interrupted by user")
-    
-    except Exception as e:
-        print(f"\n=> Error during visualization: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    finally:
-        # Clean up
-        if hasattr(env_wrapper, 'close'):
-            env_wrapper.close()
-        print(f"=> Visualization complete!")
+# Import the core viewing functions from the AI module
+try:
+    from AI.model_viewer import load_config, find_model_path, play_game_ai, replay_game
+except ImportError as e:
+    print("Error: Could not import model viewer module.")
+    print(f"Please ensure that the AI directory and model_viewer.py exist: {e}")
+    sys.exit(1)
 
 
 def main():
+    """
+    Main entry point for TAAC model viewing script.
+    Handles argument parsing and routes to appropriate viewing mode.
+    """
     parser = argparse.ArgumentParser(
-        description='TAAC Model Viewer - Display Trained Models',
+        description="View trained TAAC models in action.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -201,44 +55,70 @@ Examples:
   # View for specific number of episodes
   python scripts/view.py --config configs/mpe_simple_spread.yaml --episodes 3
   
-  # View with faster playback
-  python scripts/view.py --config configs/cooking_zoo.yaml --render_delay 0.01
+  # Non-interactive mode with faster playback
+  python scripts/view.py --config configs/cooking_zoo.yaml --render_delay 0.01 --non_interactive
+  
+  # Replay a recorded game (if available)
+  python scripts/view.py --replay experiments/boxjump/game_log.json
         """
     )
     
-    # Required arguments
-    parser.add_argument('--config', required=True, 
-                       help='Path to YAML configuration file')
+    # Main mode selection
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument('--config', type=str,
+                           help='Path to YAML configuration file (for live AI viewing)')
+    mode_group.add_argument('--replay', type=str,
+                           help='Path to game log file (for replay mode)')
     
-    # Optional arguments
+    # Live AI viewing options
     parser.add_argument('--model_path', type=str,
                        help='Path to trained model file (overrides config load_model)')
     parser.add_argument('--episodes', type=int, default=5,
                        help='Number of episodes to display (default: 5)')
     parser.add_argument('--render_delay', type=float, default=0.05,
                        help='Delay between steps in seconds (default: 0.05)')
+    parser.add_argument('--non_interactive', action='store_true',
+                       help='Run without waiting for user input between episodes')
     
     args = parser.parse_args()
     
     try:
-        # Load configuration
-        print(f"=> Loading configuration from: {args.config}")
-        config = load_config(args.config)
+        if args.replay:
+            # Replay mode
+            print(f"=> Starting replay mode...")
+            replay_game(args.replay)
+            
+        else:
+            # Live AI viewing mode
+            print(f"=> Loading configuration from: {args.config}")
+            config = load_config(args.config)
+            
+            # Find model path
+            model_path = find_model_path(config, args.model_path)
+            print(f"=> Using model: {model_path}")
+            
+            # Run AI visualization
+            play_game_ai(
+                config=config,
+                model_path=model_path,
+                episodes=args.episodes,
+                render_delay=args.render_delay,
+                interactive=not args.non_interactive
+            )
         
-        # Find model path
-        model_path = find_model_path(config, args.model_path)
+        print(f"\n=> Viewing completed successfully!")
+        return 0
         
-        # Run visualization
-        run_visualization(config, model_path, args.episodes, args.render_delay)
+    except KeyboardInterrupt:
+        print(f"\n\nViewing interrupted by user. Exiting gracefully...")
+        return 0
         
     except Exception as e:
+        print(f"\n--- An unexpected error occurred ---")
         print(f"Error: {e}")
-        import traceback
-        print("\nFull traceback:")
+        print(f"\nFull traceback:")
         traceback.print_exc()
         return 1
-    
-    return 0
 
 
 if __name__ == "__main__":

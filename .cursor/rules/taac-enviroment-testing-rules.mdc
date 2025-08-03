@@ -4,3 +4,7 @@ globs:
 alwaysApply: true
 ---
 
+I am currently creating a set of code to be able to train, test and view algorithms train in various enviroments
+
+The code should allow me to easily change specific parameters 
+

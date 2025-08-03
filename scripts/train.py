@@ -2,225 +2,272 @@
 """
 TAAC Training Script - Config-Driven Training and Evaluation
 
+This script is the main entry point for all TAAC training.
+It automatically determines whether to use single or parallel training
+based on configuration and command line arguments.
+
 Usage:
+    # Single environment training
     python scripts/train.py --config configs/boxjump.yaml
-    python scripts/train.py --config configs/mpe_simple_spread.yaml --eval_only
-    python scripts/train.py --config configs/cooking_zoo.yaml --episodes 1000
+    
+    # Parallel training (uses config num_parallel or override)
+    python scripts/train.py --config configs/boxjump.yaml --num_parallel 8
+    
+    # Evaluation mode
+    python scripts/train.py --config configs/boxjump.yaml --eval_only --model_path files/Models/boxjump/best_model.pth
+    
+    # Training with custom job name
+    python scripts/train.py --config configs/mpe_simple_spread.yaml --job_name my_experiment --episodes 2000
 """
 
-import argparse
-import yaml
-import os
 import sys
-from pathlib import Path
+import os
+import argparse
+import traceback
+import yaml
 
-# Add AI directory to path
-sys.path.append(str(Path(__file__).parent.parent / "AI"))
+# Add the project root to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from train_taac import main_with_args as train_main
+# Import training functions
+try:
+    from AI.train_taac import train_taac
+    from AI.train_taac_parallel import train_taac_parallel
+    from AI.env_wrapper import TAACEnvironmentWrapper
+    from AI.TAAC import TAAC
+except ImportError as e:
+    print("Error: Could not import training modules.")
+    print(f"Please ensure that the AI directory and training files exist: {e}")
+    sys.exit(1)
 
 
-def load_config(config_path):
-    """Load and validate configuration file."""
+def load_config(config_path: str) -> dict:
+    """Load configuration from YAML file"""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
-    # Validate required sections
-    required_sections = ['environment', 'training', 'logging']
-    for section in required_sections:
-        if section not in config:
-            raise ValueError(f"Missing required config section: {section}")
-    
     return config
 
 
-def setup_directories(config):
-    """Create necessary directories based on config."""
-    # Create model save directory
-    model_path = Path(config.get('output', {}).get('model_save_path', 'files/Models/'))
-    model_path.mkdir(parents=True, exist_ok=True)
+def evaluate_agent(config: dict, model_path: str) -> None:
+    """Run evaluation mode with a trained model"""
+    print("\n=> Starting evaluation mode...")
     
-    # Create experiment log directory  
-    log_path = Path(config.get('output', {}).get('log_save_path', 'experiments/'))
-    log_path.mkdir(parents=True, exist_ok=True)
+    if not model_path or not os.path.exists(model_path):
+        raise ValueError(f"Valid model path required for evaluation: {model_path}")
     
-    return model_path, log_path
-
-
-def config_to_args(config, args):
-    """Convert config file to command line arguments for train_taac.py."""
-    cmd_args = []
-    
-    # Environment
+    # Create environment
     env_name = config['environment']['name']
-    cmd_args.extend(['--env', env_name])
+    env_kwargs = config['environment'].get('env_kwargs', {})
     
-    # Training parameters
-    training = config.get('training', {})
-    if 'episodes' in training:
-        cmd_args.extend(['--episodes', str(training['episodes'])])
-    if 'learning_rate' in training:
-        cmd_args.extend(['--learning_rate', str(training['learning_rate'])])
-    if 'gamma' in training:
-        cmd_args.extend(['--gamma', str(training['gamma'])])
+    print(f"=> Creating evaluation environment: {env_name}")
+    env_wrapper = TAACEnvironmentWrapper(
+        env_name, 
+        apply_wrappers=config['environment'].get('apply_wrappers', True),
+        **env_kwargs
+    )
     
-    # Logging parameters
-    logging = config.get('logging', {})
-    if 'log_interval' in logging:
-        cmd_args.extend(['--log_interval', str(logging['log_interval'])])
-    if 'save_interval' in logging:
-        cmd_args.extend(['--save_interval', str(logging['save_interval'])])
-    if 'eval_interval' in logging:
-        cmd_args.extend(['--eval_interval', str(logging['eval_interval'])])
+    # Create TAAC agent
+    env_config = env_wrapper.env_info
+    training_config = config.get('training', {})
     
-    # Output paths
-    output = config.get('output', {})
-    if 'model_save_path' in output:
-        cmd_args.extend(['--model_save_path', output['model_save_path']])
+    # Merge model configuration if available
+    if 'model' in config:
+        training_config.update(config['model'])
     
-    # Check for load_model in config
-    if 'load_model' in config and config['load_model']:
-        cmd_args.extend(['--model_path', str(config['load_model'])])
-        print(f"=> Loading existing model: {config['load_model']}")
+    print(f"=> Loading model: {model_path}")
+    taac_agent = TAAC(env_config, training_config, mode="test")
     
-    # Override with command line arguments
-    if args.episodes:
-        # Remove existing episodes arg if present
-        if '--episodes' in cmd_args:
-            idx = cmd_args.index('--episodes')
-            cmd_args = cmd_args[:idx] + cmd_args[idx+2:]
-        cmd_args.extend(['--episodes', str(args.episodes)])
+    if not taac_agent.load_model(model_path):
+        raise RuntimeError(f"Failed to load model from: {model_path}")
     
-    if args.eval_only:
-        cmd_args.append('--eval_only')
-        if args.model_path:
-            cmd_args.extend(['--model_path', args.model_path])
+    print(f"=> Model loaded successfully!")
     
-    if args.render:
-        cmd_args.append('--render')
+    # Run evaluation episodes
+    num_eval_episodes = config.get('logging', {}).get('eval_episodes', 5)
+    print(f"=> Running {num_eval_episodes} evaluation episodes...")
     
-    # Handle num_parallel with proper precedence: command line > config > default
-    final_num_parallel = args.num_parallel  # Command line override
-    if final_num_parallel is None:
-        final_num_parallel = training.get('num_parallel', 4)  # Config file or default
-    cmd_args.extend(['--num_parallel', str(final_num_parallel)])
+    total_rewards = []
+    episode_lengths = []
     
-    return cmd_args
+    for episode in range(num_eval_episodes):
+        print(f"\nEvaluation Episode {episode + 1}/{num_eval_episodes}")
+        
+        states, _ = env_wrapper.reset()
+        episode_reward = 0
+        step_count = 0
+        done = False
+        
+        while not done and step_count < 1000:
+            actions, _ = taac_agent.get_actions(list(states.values()))
+            states, rewards, done, _ = env_wrapper.step(actions)
+            
+            episode_reward += sum(rewards)
+            step_count += 1
+        
+        total_rewards.append(episode_reward)
+        episode_lengths.append(step_count)
+        
+        print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}, Length = {step_count}")
+    
+    # Print evaluation results
+    import numpy as np
+    print(f"\n=> Evaluation Results:")
+    print(f"  - Mean Reward: {np.mean(total_rewards):.2f} ± {np.std(total_rewards):.2f}")
+    print(f"  - Mean Length: {np.mean(episode_lengths):.1f} ± {np.std(episode_lengths):.1f}")
+    print(f"  - Best Episode: {max(total_rewards):.2f}")
+    print(f"  - Worst Episode: {min(total_rewards):.2f}")
+    
+    # Clean up
+    env_wrapper.close()
+    print(f"=> Evaluation complete!")
+
+
+def determine_training_mode(config: dict, args: argparse.Namespace) -> tuple:
+    """
+    Determine whether to use single or parallel training based on config and args.
+    
+    Returns:
+        (use_parallel: bool, num_parallel: int)
+    """
+    # Check command line override first
+    if args.num_parallel is not None:
+        num_parallel = args.num_parallel
+    else:
+        # Check config file
+        num_parallel = config.get('training', {}).get('num_parallel', 1)
+    
+    # Rendering forces single environment mode
+    if args.render and num_parallel > 1:
+        print("Warning: Rendering is only supported for single-environment training.")
+        print("Automatically switching to single environment mode.")
+        num_parallel = 1
+    
+    use_parallel = num_parallel > 1
+    
+    return use_parallel, num_parallel
 
 
 def main():
+    """
+    Main entry point for TAAC training script.
+    Handles argument parsing and routes to appropriate training mode.
+    """
     parser = argparse.ArgumentParser(
-        description='TAAC Training Script',
+        description="Train a TAAC agent on a specified environment.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Train on default config (4 parallel environments)
+  # Single environment training (auto-detected from config)
   python scripts/train.py --config configs/mpe_simple_spread.yaml
   
-  # Train with parallel environments for faster training
-  python scripts/train.py --config configs/boxjump.yaml --episodes 5000 --num_parallel 8
+  # Parallel training with 8 environments
+  python scripts/train.py --config configs/boxjump.yaml --num_parallel 8
   
-  # Train with single environment (traditional mode)
-  python scripts/train.py --config configs/boxjump.yaml --num_parallel 1
+  # Training with custom settings
+  python scripts/train.py --config configs/boxjump.yaml --job_name tower_builder --episodes 2000
   
-  # Evaluate trained model
+  # Training with rendering (forces single env)
+  python scripts/train.py --config configs/boxjump.yaml --render
+  
+  # Continue training from existing model
+  python scripts/train.py --config configs/boxjump.yaml --load_model files/Models/boxjump/checkpoint.pth
+  
+  # Evaluation mode
   python scripts/train.py --config configs/boxjump.yaml --eval_only --model_path files/Models/boxjump/best_model.pth
-  
-  # Train with rendering (automatically uses single environment)
-  python scripts/train.py --config configs/cooking_zoo.yaml --render --num_parallel 1
         """
     )
     
     # Required arguments
-    parser.add_argument('--config', required=True, 
-                       help='Path to YAML configuration file')
+    parser.add_argument("--config", type=str, required=True, 
+                       help="Path to the configuration YAML file")
     
-    # Optional overrides
-    parser.add_argument('--episodes', type=int,
-                       help='Override number of training episodes')
-    parser.add_argument('--eval_only', action='store_true',
-                       help='Only evaluate, do not train')
-    parser.add_argument('--model_path', type=str,
-                       help='Path to model for evaluation (required with --eval_only)')
-    parser.add_argument('--render', action='store_true',
-                       help='Render environment during training/evaluation')
-    parser.add_argument('--num_parallel', type=int, default=None,
-                       help='Number of parallel environments for training (default: from config or 4, use 1 for single env)')
+    # Training mode arguments
+    parser.add_argument("--job_name", type=str, default=None, 
+                       help="Unique name for the training job (default: from config)")
+    parser.add_argument("--episodes", type=int, default=None, 
+                       help="Override number of training episodes from config")
+    parser.add_argument("--num_parallel", type=int, default=None, 
+                       help="Override number of parallel environments (1 = single, 2+ = parallel)")
+    parser.add_argument("--load_model", type=str, default=None, 
+                       help="Path to pre-trained model to continue training from")
+    parser.add_argument("--render", action="store_true", 
+                       help="Enable rendering during training (forces single environment)")
+    
+    # Evaluation mode arguments
+    parser.add_argument("--eval_only", action="store_true", 
+                       help="Run in evaluation mode instead of training")
+    parser.add_argument("--model_path", type=str, default=None, 
+                       help="Path to trained model for evaluation (required with --eval_only)")
     
     args = parser.parse_args()
     
-    # Validate arguments
-    if args.eval_only and not args.model_path:
-        parser.error("--model_path is required when using --eval_only")
-    
     try:
         # Load configuration
-        print(f"Loading configuration from: {args.config}")
+        print(f"=> Loading configuration from: {args.config}")
         config = load_config(args.config)
         
-        # Setup directories
-        model_path, log_path = setup_directories(config)
-        print(f"Model save path: {model_path}")
-        print(f"Log save path: {log_path}")
-        
-        # Show environment info
-        env_name = config['environment']['name']
-        print(f"Environment: {env_name}")
-        
-        if args.eval_only:
-            print(f"Mode: Evaluation only")
-            print(f"Model path: {args.model_path}")
-        else:
-            episodes = args.episodes or config.get('training', {}).get('episodes', 1000)
-            # Get the final num_parallel value that will be used
-            final_num_parallel = args.num_parallel
-            if final_num_parallel is None:
-                final_num_parallel = config.get('training', {}).get('num_parallel', 4)
+        # Override config with command-line arguments
+        if args.episodes:
+            config.setdefault('training', {})['episodes'] = args.episodes
+            print(f"=> Overriding episodes to: {args.episodes}")
             
-            parallel_mode = "Parallel" if final_num_parallel > 1 else "Single Environment"
-            print(f"Mode: {parallel_mode} Training for {episodes} episodes")
-            if final_num_parallel > 1:
-                print(f"Parallel environments: {final_num_parallel}")
+        if args.render:
+            config.setdefault('environment', {}).setdefault('env_kwargs', {})['render_mode'] = "human"
+            print("=> Enabling rendering")
+            
+        if args.load_model:
+            config['load_model'] = args.load_model
+            print(f"=> Will load model from: {args.load_model}")
         
-        # Convert config to command line arguments
-        cmd_args = config_to_args(config, args)
-        print(f"Running: train_taac.py {' '.join(cmd_args)}")
+        if args.job_name:
+            config['job_name'] = args.job_name
+            print(f"=> Will use job name: {args.job_name}")
         
-        # Create mock args object for train_taac
-        import argparse as ap
-        train_parser = ap.ArgumentParser()
-        train_parser.add_argument('--env', default='mpe_simple_spread')
-        train_parser.add_argument('--episodes', type=int, default=1000)
-        train_parser.add_argument('--learning_rate', type=float, default=3e-4)
-        train_parser.add_argument('--gamma', type=float, default=0.99)
-        train_parser.add_argument('--log_interval', type=int, default=10)
-        train_parser.add_argument('--save_interval', type=int, default=100)
-        train_parser.add_argument('--eval_interval', type=int, default=50)
-        train_parser.add_argument('--model_save_path', default='files/Models/')
-        train_parser.add_argument('--eval_only', action='store_true')
-        train_parser.add_argument('--model_path', default=None)
-        train_parser.add_argument('--render', action='store_true')
-        train_parser.add_argument('--num_parallel', type=int, default=4)
+        # Handle evaluation mode
+        if args.eval_only:
+            if not args.model_path:
+                print("Error: --model_path is required when using --eval_only")
+                return 1
+            
+            evaluate_agent(config, args.model_path)
+            return 0
         
-        train_args = train_parser.parse_args(cmd_args)
+        # Determine training mode (single vs parallel)
+        use_parallel, num_parallel = determine_training_mode(config, args)
         
-        # Add config to args for train_taac to use
-        train_args.config = config
+        if use_parallel:
+            print(f"\n=> Starting parallel training with {num_parallel} environments...")
+            
+            # Validate parallel settings
+            if num_parallel < 1:
+                print("Error: Number of parallel environments must be at least 1")
+                return 1
+            
+            # Run parallel training
+            train_taac_parallel(config, num_parallel_games=num_parallel)
+            
+        else:
+            print(f"\n=> Starting single environment training...")
+            
+            # Run single environment training
+            train_taac(config)
         
-        # Run training/evaluation
-        train_main(train_args)
+        print(f"\n=> Training completed successfully!")
+        return 0
+        
+    except KeyboardInterrupt:
+        print(f"\n\nTraining interrupted by user. Exiting gracefully...")
+        return 0
         
     except Exception as e:
+        print(f"\n--- An unexpected error occurred ---")
         print(f"Error: {e}")
-        import traceback
-        print("\nFull traceback:")
+        print(f"\nFull traceback:")
         traceback.print_exc()
         return 1
-    
-    return 0
 
 
 if __name__ == "__main__":

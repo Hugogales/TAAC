@@ -6,9 +6,14 @@ import gymnasium as gym
 import copy
 import os
 from typing import Dict, Any, Optional, Union
+from torch.distributions import Categorical
 
 
-class Memory:
+class Memory: 
+    """
+    This is a per agent class that stores the experience of the agent.
+    It can be conbined with other episodes agents to combine the experience of all agents for parallel training.
+    """
     def __init__(self):
         self.states = []
         self.actions = []
@@ -28,14 +33,14 @@ class Memory:
 
 class AttentionActorCriticNetwork(nn.Module):
     
-    def __init__(self, state_size, action_size, action_space_type="discrete", num_heads=4, embedding_dim=256, hidden_size=526):
+    def __init__(self, state_size, action_size, num_heads=4, embedding_dim=256, hidden_size=526):
         super(AttentionActorCriticNetwork, self).__init__()
 
         # Make hyperparameters configurable instead of importing from external file
         self.temperature = 1.0  # Default value, can be overridden
         self.similarity_loss_cap = -0.5  # Default value, can be overridden
         self.action_size = action_size
-        self.action_space_type = action_space_type  # "discrete" or "continuous"
+        self.action_space_type = "discrete"  # Only supporting discrete actions
         self.emb_dim = embedding_dim
 
         self.hidden_size = hidden_size
@@ -54,33 +59,17 @@ class AttentionActorCriticNetwork(nn.Module):
             batch_first=True  # so input can be [batch_size, seq_len, embed_dim]
         )
 
-        # Actor output depends on action space type
-        if action_space_type == "discrete":
-            self.actor_out = nn.Sequential(
-                nn.Linear(embedding_dim, self.hidden_size),
-                nn.LeakyReLU(),
-                nn.Linear(self.hidden_size, self.hidden_size),
-                nn.LeakyReLU(),
-                nn.Linear(self.hidden_size, action_size)
-            )
-        else:  # continuous
-            # For multi-dimensional continuous actions, we need separate mean and std networks
-            self.actor_mean = nn.Sequential(
-                nn.Linear(embedding_dim, self.hidden_size),
-                nn.LeakyReLU(),
-                nn.Linear(self.hidden_size, self.hidden_size),
-                nn.LeakyReLU(),
-                nn.Linear(self.hidden_size, action_size)
-            )
-            # Learnable log standard deviation for each action dimension
-            self.actor_logstd = nn.Parameter(torch.zeros(action_size))
-            
-            # Optional: Action bounds for clamping (can be set externally)
-            self.action_low = -1.0  # Default bounds
-            self.action_high = 1.0
+        # Actor output for discrete action space
+        self.actor_out = nn.Sequential(
+            nn.Linear(embedding_dim, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, action_size)
+        )
 
-        # Critic network - input size depends on action space type
-        critic_input_size = state_size + (action_size if action_space_type == "discrete" else action_size)
+        # Critic network
+        critic_input_size = state_size + action_size  # For discrete actions
         
         self.critic_embedding = nn.Sequential(
             nn.Linear(critic_input_size, self.hidden_size),
@@ -106,11 +95,7 @@ class AttentionActorCriticNetwork(nn.Module):
         )
 
         print(f"Network created with {sum(p.numel() for p in self.parameters())} parameters")
-        print(f"State size: {state_size}, Action size: {action_size}, Action type: {action_space_type}")
-        if action_space_type == "continuous":
-            print(f"Continuous action dimensions: {action_size}")
-            print(f"Actor mean output shape: [batch_size, num_agents, {action_size}]")
-            print(f"Actor std parameters: {action_size} learnable log-std values")
+        print(f"State size: {state_size}, Action size: {action_size}, Action type: discrete")
 
     def actor_forward(self, x):
         """
@@ -119,8 +104,7 @@ class AttentionActorCriticNetwork(nn.Module):
           - num_agents is the number of agents
           - state_dim is the dimension of each agent's state
         Returns:
-          For discrete: action_probs [batch_size, num_agents, action_size]
-          For continuous: (mean, std) tuple
+          action_probs [batch_size, num_agents, action_size]
         """
         B, N, D = x.shape
         actor_input = x.reshape(B*N, -1) # [B*N, state_size]
@@ -128,15 +112,9 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
         
-        if self.action_space_type == "discrete":
-            action_logits = self.actor_out(attn_output) # [B, N, action_size]
-            action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
-            return action_probs
-        else:  # continuous
-            action_mean = self.actor_mean(attn_output)
-            action_std = torch.exp(self.actor_logstd).expand_as(action_mean)
-            return action_mean, action_std
-
+        action_logits = self.actor_out(attn_output) # [B, N, action_size]
+        action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
+        return action_probs
 
     def actor_forward_update(self, x):
         """
@@ -147,8 +125,7 @@ class AttentionActorCriticNetwork(nn.Module):
         
         Additionally calculate similarity loss for training
         Returns:
-          For discrete: action_probs [batch_size, num_agents, action_size]
-          For continuous: (mean, std) tuple
+          action_probs [batch_size, num_agents, action_size]
         """
         B, N, D = x.shape
         actor_input = x.reshape(B*N, -1) # [B*N, state_size]
@@ -167,16 +144,11 @@ class AttentionActorCriticNetwork(nn.Module):
         similarity_loss = torch.clamp(similarity_loss, min=self.similarity_loss_cap)
         similarity_loss = similarity_loss.mean()
         
-        if self.action_space_type == "discrete":
-            action_logits = self.actor_out(attn_output)
-            action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
-            return action_probs, similarity_loss
-        else:  # continuous
-            action_mean = self.actor_mean(attn_output)
-            action_std = torch.exp(self.actor_logstd).expand_as(action_mean)
-            return (action_mean, action_std), similarity_loss
-    
-    def critic_forward(self, x, actions):
+        action_logits = self.actor_out(attn_output)
+        action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
+        return action_probs, similarity_loss
+
+    def critic_forward(self, x, action_idx):
         """
         x.shape = [batch_size, num_agents, state_dim]
           - batch_size is # of timesteps or mini-batch size
@@ -186,43 +158,26 @@ class AttentionActorCriticNetwork(nn.Module):
           action_probs: [batch_size, num_agents, action_size]
         """
         B, N, D = x.shape
-        
-        if self.action_space_type == "discrete":
-            # Convert discrete actions to one-hot
-            action_one_hot = torch.zeros(B, N, self.action_size).to(x.device)
-            action_one_hot.scatter_(-1, actions.unsqueeze(-1), 1)
-            critic_input = torch.cat([x, action_one_hot], dim=-1)
-        else:  # continuous
-            # Use action values directly
-            critic_input = torch.cat([x, actions], dim=-1)
-            
-        critic_input = critic_input.reshape(B*N, -1)
-        critic_input = self.critic_embedding(critic_input)
-        critic_input = critic_input.reshape(B, N, -1)
-        attn_output, _ = self.critic_attention_block(critic_input, critic_input, critic_input)
-        attn_output = torch.cat([attn_output, critic_input], dim=-1)
-        values = self.critic_out(attn_output).squeeze(-1)
-        return values.reshape(B, N)
+        action_one_hot = torch.zeros(B, N, self.action_size).to(x.device) # [B, N, action_size]
+        action_one_hot.scatter_(-1, action_idx.unsqueeze(-1), 1) # [B, N, action_size]
+        critic_input = torch.cat([x, action_one_hot], dim=-1) # [B, N, state_size + action_size]
+        critic_input = critic_input.reshape(B*N, -1) # [B*N, state_size + action_size]
+        critic_input = self.critic_embedding(critic_input) # [B*N, embedding_dim]
+        critic_input = critic_input.reshape(B, N, -1) # [B, N, embedding_dim]
+        attn_output, _ = self.critic_attention_block(critic_input, critic_input, critic_input) # [B, N, embedding_dim]
+        attn_output = torch.cat([attn_output, critic_input], dim=-1) # [B, N, 2*embedding_dim]
+        values = self.critic_out(attn_output).squeeze(-1) # [B, N]
+        values = values.reshape(B, N) # [B, N]
+        return values
 
-    def multi_agent_baseline(self, x, actions):
+
+    def multi_agent_baseline(self, x, action_idx): # this was hard
         """
-        Compute baseline values for multi-agent setting
-        x.shape = [batch_size, num_agents, state_dim]
-          - batch_size is # of timesteps or mini-batch size
-          - num_agents is the number of agents
-          - state_dim is the dimension of each agent's state
-        actions.shape = [batch_size, num_agents]
-          - batch_size is # of timesteps or mini-batch size
-          - num_agents is the number of agents
-          - value is the id of the action
+        x.shape = [B, N, state_dim]
+        action_idx.shape = [B, N]
         Returns:
-          baseline_values: [batch_size, num_agents]
+        baseline_values: [B, N]
         """
-        if self.action_space_type == "continuous":
-            # For continuous actions, we cannot use the multi-agent baseline
-            return self.critic_forward(x, actions)
-            
-        # Original implementation for discrete actions
         B, N, state_dim = x.shape
 
         with torch.no_grad():
@@ -231,7 +186,7 @@ class AttentionActorCriticNetwork(nn.Module):
 
             #  Embedding for chosen action (one per agent/batch):
             chosen_action_one_hot = torch.zeros(B, N, self.action_size, device=x.device)
-            chosen_action_one_hot.scatter_(-1, actions.unsqueeze(-1), 1)
+            chosen_action_one_hot.scatter_(-1, action_idx.unsqueeze(-1), 1)
             chosen_critic_input = torch.cat([x, chosen_action_one_hot], dim=-1)  # [B, N, state_dim + A]
             chosen_critic_input = chosen_critic_input.view(B*N, -1)              # [B*N, state_dim + A]
             chosen_emb = self.critic_embedding(chosen_critic_input)              # [B*N, emb_dim]
@@ -280,7 +235,6 @@ class AttentionActorCriticNetwork(nn.Module):
 
             return baseline_values
 
-
 class TAAC:
     def __init__(self, env_config: Dict[str, Any], training_config: Optional[Dict[str, Any]] = None, mode="train"):
         """
@@ -297,29 +251,30 @@ class TAAC:
         # Extract environment info
         self.state_size = env_config['state_size']
         self.action_size = env_config['action_size']
-        self.action_space_type = env_config.get('action_space_type', 'discrete')
+        self.action_space_type = "discrete"  # Only supporting discrete actions
         self.number_of_agents = env_config['num_agents']
         
         # Training hyperparameters with defaults
         if training_config is None:
             training_config = {}
             
-        self.gamma = training_config.get('gamma', 0.99)
-        self.epsilon_clip = training_config.get('epsilon_clip', 0.2)
-        self.K_epochs = training_config.get('K_epochs', 10)
-        self.learning_rate = training_config.get('learning_rate', 3e-4)
-        self.c_entropy = training_config.get('c_entropy', 0.01)
-        self.max_grad_norm = training_config.get('max_grad_norm', 0.5)
-        self.c_value = training_config.get('c_value', 0.5)
-        self.lam = training_config.get('lam', 0.95)
-        self.mini_batch_size = training_config.get('batch_size', 64)
-        self.min_learning_rate = training_config.get('min_learning_rate', 1e-6)
-        self.episodes = training_config.get('episodes', 1000)
-        self.similarity_loss_coef = training_config.get('similarity_loss_coef', 0.01)
-        self.similarity_loss_cap = training_config.get('similarity_loss_cap', 0)
-        self.num_heads = training_config.get('num_heads', 4)
-        self.embedding_dim = training_config.get('embedding_dim', 256)
-        self.hidden_size = training_config.get('hidden_size', 526)
+        # Convert values to correct types (handles YAML string conversion issues)
+        self.gamma = float(training_config.get('gamma', 0.99))
+        self.epsilon_clip = float(training_config.get('epsilon_clip', 0.2))
+        self.K_epochs = int(training_config.get('K_epochs', 10))
+        self.learning_rate = float(training_config.get('learning_rate', 3e-4))
+        self.c_entropy = float(training_config.get('c_entropy', 0.01))
+        self.max_grad_norm = float(training_config.get('max_grad_norm', 0.5))
+        self.c_value = float(training_config.get('c_value', 0.5))
+        self.lam = float(training_config.get('lam', 0.95))
+        self.mini_batch_size = int(training_config.get('batch_size', 64))
+        self.min_learning_rate = float(training_config.get('min_learning_rate', 1e-6))
+        self.episodes = int(training_config.get('episodes', 1000))
+        self.similarity_loss_coef = float(training_config.get('similarity_loss_coef', 0.01))
+        self.similarity_loss_cap = float(training_config.get('similarity_loss_cap', 0))
+        self.num_heads = int(training_config.get('num_heads', 4))
+        self.embedding_dim = int(training_config.get('embedding_dim', 256))
+        self.hidden_size = int(training_config.get('hidden_size', 526))
         
         self.mini_batch_size = int(self.mini_batch_size // self.number_of_agents)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -337,8 +292,8 @@ class TAAC:
         self.MseLoss = nn.MSELoss()
 
     def lr_lambda(self, epoch):
-        initial_lr = self.learning_rate
-        final_lr = self.min_learning_rate
+        initial_lr = float(self.learning_rate)
+        final_lr = float(self.min_learning_rate)
         total_epochs = self.episodes
         lr = final_lr + (initial_lr - final_lr) * (1 - epoch / total_epochs)
         return max(lr / initial_lr, final_lr / initial_lr)
@@ -347,7 +302,6 @@ class TAAC:
         network = AttentionActorCriticNetwork(
             state_size=self.state_size, 
             action_size=self.action_size, 
-            action_space_type=self.action_space_type,
             num_heads=self.num_heads,
             embedding_dim=self.embedding_dim,
             hidden_size=self.hidden_size
@@ -357,62 +311,37 @@ class TAAC:
         return network
 
     def select_action(self, state):
-        """
-        Select actions for all agents given their states
-        
-        Args:
-            state: List of states for each agent
-            
-        Returns:
-            actions, log_probs, entropy
-        """
+        # 'state' is a list of observations for each agent
         try:
-            # Convert to numpy array first for efficiency, then to tensor
             state_array = np.array(state, dtype=np.float32)
-            state_tensor = torch.from_numpy(state_array).unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                if self.action_space_type == "discrete":
-                    action_probs = self.policy_old.actor_forward(state_tensor)
-                    dist = torch.distributions.Categorical(action_probs)
-                    action = dist.sample()
-                    action_log_prob = dist.log_prob(action)
-                    entropy = dist.entropy()
-                else:  # continuous - handles multi-dimensional actions
-                    action_mean, action_std = self.policy_old.actor_forward(state_tensor)
-                    
-                    # Create distribution for each action dimension
-                    dist = torch.distributions.Normal(action_mean, action_std)
-                    raw_action = dist.sample()
-                    
-                    # Apply tanh transformation for bounded actions [-1, 1]
-                    action = torch.tanh(raw_action)
-                    
-                    # Scale to actual action bounds if needed
-                    if hasattr(self.policy_old, 'action_low') and hasattr(self.policy_old, 'action_high'):
-                        action_low = self.policy_old.action_low
-                        action_high = self.policy_old.action_high
-                        # Scale from [-1, 1] to [action_low, action_high]
-                        action = action_low + (action_high - action_low) * (action + 1) / 2
-                    
-                    # Adjust log probabilities for tanh transformation
-                    # For multi-dimensional actions, sum over action dimensions
-                    action_log_prob = dist.log_prob(raw_action).sum(dim=-1)
-                    action_log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1)
-                    
-                    # Entropy sum over action dimensions for multi-dimensional actions
-                    entropy = dist.entropy().sum(dim=-1)
-                    
+
+            state_tensor = torch.from_numpy(state_array).to(self.device)
+            state_tensor = state_tensor.unsqueeze(0) # add batch dimension
+            action_probs = self.policy.actor_forward(state_tensor)
+            action_probs = action_probs.squeeze(0) # remove batch dimension
+            dist = Categorical(action_probs)
+            actions = dist.sample()
+            
+            # Get log probabilities and entropy
+            log_probs = dist.log_prob(actions)
+            entropies = dist.entropy()
+
+            # Return actions and log probs as dictionaries
+            return {f"agent_{i}": act.item() for i, act in enumerate(actions)}, \
+                   {f"agent_{i}": lp.item() for i, lp in enumerate(log_probs)}, \
+                   {f"agent_{i}": ent.item() for i, ent in enumerate(entropies)}
+
         except ValueError as e:
-            print(e)
-            print(f"state tensor: {state_tensor}")
-            print(f"state tensor shape: {state_tensor.shape}")
-            if self.action_space_type == "continuous":
-                print(f"action_size: {self.action_size}")
-            raise ValueError("Error in action selection")
+            print(f"Error creating state tensor: {e}")
+            print("This usually means the observation format from the environment is incorrect.")
+            print(f"Received state shape: {len(state)} agents, with individual shapes: {[s.shape for s in state if hasattr(s, 'shape')]}")
+            # Re-raise the error to stop execution, as this is a critical issue
+            raise e
+        except Exception as e:
+            # Catch other potential errors
+            print(f"An unexpected error occurred in select_action: {e}")
+            raise e
 
-        return action, action_log_prob, entropy
-
-    
 
     def update(self):
         """
@@ -449,13 +378,7 @@ class TAAC:
             
             # Convert lists to tensors and reshape (optimize for performance)
             old_states = torch.from_numpy(np.array(old_states, dtype=np.float32)).permute(1, 0, 2).to(self.device) # [B, N, state_size]
-            
-            # Handle different action types
-            if self.action_space_type == "discrete":
-                old_actions = torch.LongTensor(old_actions).permute(1, 0).to(self.device) # [B, N]
-            else:  # continuous
-                old_actions = torch.FloatTensor(old_actions).permute(1, 0, 2).to(self.device) # [B, N, action_size]
-                
+            old_actions = torch.LongTensor(old_actions).permute(1, 0).to(self.device) # [B, N]
             old_log_probs = torch.FloatTensor(old_log_probs).permute(1, 0).to(self.device) # [B, N]
             rewards = torch.FloatTensor(rewards).permute(1, 0).to(self.device) # [B, N]
             dones = torch.FloatTensor(dones).permute(1, 0).to(self.device) # [B, N]
@@ -476,7 +399,7 @@ class TAAC:
 
         # Concatenate experiences from all agents
         states = torch.cat(states, dim=0) # [B*G , N, state_size]
-        actions = torch.cat(actions, dim=0) # [B*G , N] for discrete, [B*G, N, action_size] for continuous
+        actions = torch.cat(actions, dim=0) # [B*G , N]
         log_probs = torch.cat(log_probs, dim=0) # [B*G , N]
         advantages = torch.cat(advantages, dim=0) # [B*G , N] 
         gae_returns = torch.cat(gae_returns, dim=0) # [B*G , N]
@@ -506,26 +429,17 @@ class TAAC:
 
                 # Slice the mini-batch
                 mini_states = states[start:end] # [mini_batch_size, N, state_size]
-                mini_actions = actions[start:end] # [mini_batch_size, N] for discrete, [mini_batch_size, N, action_size] for continuous
+                mini_actions = actions[start:end] # [mini_batch_size, N]
                 mini_log_probs = log_probs[start:end] # [mini_batch_size, N]
                 mini_advantages = advantages[start:end] # [mini_batch_size, N]
                 mini_gae_returns = gae_returns[start:end] # [mini_batch_size, N]
                 
                 # Forward pass
-                if self.action_space_type == "discrete":
-                    action_probs, similarity_loss= self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size]
-                    state_values_new = self.policy.critic_forward(mini_states, mini_actions) # [mini_batch_size, N]
-                    dist = torch.distributions.Categorical(action_probs) # [mini_batch_size, N]
-                    action_log_probs = dist.log_prob(mini_actions) # [mini_batch_size, N]
-                    dist_entropy = dist.entropy() # [mini_batch_size, N]
-                else: # continuous - multi-dimensional actions
-                    (action_mean, action_std), similarity_loss = self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size]
-                    state_values_new = self.policy.critic_forward(mini_states, mini_actions) # [mini_batch_size, N]
-                    dist = torch.distributions.Normal(action_mean, action_std) # Multi-dimensional normal distribution
-                    # For multi-dimensional actions, sum log probabilities across action dimensions
-                    action_log_probs = dist.log_prob(mini_actions).sum(dim=-1) # [mini_batch_size, N]
-                    # For multi-dimensional actions, sum entropy across action dimensions  
-                    dist_entropy = dist.entropy().sum(dim=-1) # [mini_batch_size, N]
+                action_probs, similarity_loss = self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size]
+                state_values_new = self.policy.critic_forward(mini_states, mini_actions) # [mini_batch_size, N]
+                dist = torch.distributions.Categorical(action_probs) # [mini_batch_size, N]
+                action_log_probs = dist.log_prob(mini_actions) # [mini_batch_size, N]
+                dist_entropy = dist.entropy() # [mini_batch_size, N]
                 
                 # Calculate the ratios
                 ratios = torch.exp(action_log_probs - mini_log_probs) # [mini_batch_size, N]
@@ -539,48 +453,6 @@ class TAAC:
                 critic_loss = self.MseLoss(state_values_new.squeeze(), mini_gae_returns) 
 
                 loss = actor_loss + self.c_value * critic_loss - self.c_entropy * dist_entropy.mean() + self.similarity_loss_coef * similarity_loss
-
-                # Backward pass and optimization
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
-                self.optimizer.step()
-
-            # Handle any remaining data not fitting into mini-batches
-            remainder = dataset_size % mini_batch_size
-            if remainder != 0:
-                start = num_mini_batches * mini_batch_size
-                mini_states = states[start:]
-                mini_actions = actions[start:]
-                mini_log_probs = log_probs[start:]
-                mini_advantages = advantages[start:]
-                mini_gae_returns = gae_returns[start:]
-
-                if self.action_space_type == "discrete":
-                    action_probs, similarity_loss = self.policy.actor_forward_update(mini_states)
-                    state_values_new = self.policy.critic_forward(mini_states, mini_actions)
-                    dist = torch.distributions.Categorical(action_probs)
-                    action_log_probs = dist.log_prob(mini_actions)
-                    dist_entropy = dist.entropy()
-                else: # continuous - multi-dimensional actions
-                    (action_mean, action_std), similarity_loss = self.policy.actor_forward_update(mini_states)
-                    state_values_new = self.policy.critic_forward(mini_states, mini_actions)
-                    dist = torch.distributions.Normal(action_mean, action_std) # Multi-dimensional normal distribution
-                    # For multi-dimensional actions, sum log probabilities across action dimensions
-                    action_log_probs = dist.log_prob(mini_actions).sum(dim=-1)
-                    # For multi-dimensional actions, sum entropy across action dimensions
-                    dist_entropy = dist.entropy().sum(dim=-1)
-                
-                # Calculate the ratios
-                ratios = torch.exp(action_log_probs - mini_log_probs)
-
-                # Calculate surrogate losses
-                surr1 = ratios * mini_advantages
-                surr2 = torch.clamp(ratios, 1 - self.epsilon_clip, 1 + self.epsilon_clip) * mini_advantages
-                actor_loss = -torch.min(surr1, surr2).mean()
-                critic_loss = self.MseLoss(state_values_new.squeeze(), mini_gae_returns)
-                loss = actor_loss + self.c_value * critic_loss - self.c_entropy * dist_entropy.mean() + self.similarity_loss_coef * similarity_loss
-                # Calculate loss
 
                 # Backward pass and optimization
                 self.optimizer.zero_grad()
@@ -637,27 +509,31 @@ class TAAC:
         return returns, advantages
 
     
-    def save_model(self, model_name="PPO_model_giant"):
-        path = f"files/Models/{model_name}.pth"
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(self.policy.state_dict(), path)
-        print(f"Model saved to {path}")
+    def save_model(self, model_path: str):
+        """Save the model to the specified path."""
+        print(f"--> Saving model to {model_path}")
+        torch.save(self.policy_old.state_dict(), model_path)
 
-
-    def load_model(self, model_name="PPO_model_big", test=False):
-        path = f"files/Models/{model_name}.pth"
-        if os.path.exists(path):
-            self.policy.load_state_dict(torch.load(path, map_location=self.device))
-            self.policy_old.load_state_dict(self.policy.state_dict())
-            if test:
-                self.policy.eval()
-                self.policy_old.eval()
-            else:
-                self.policy.train()
-                self.policy_old.train()
-            print(f"Model loaded from {path}")
+    def load_model(self, model_path: str, test=False) -> bool:
+        """Load the model from the specified path."""
+        if os.path.exists(model_path):
+            try:
+                if test:
+                    # For evaluation, only load the main policy
+                    self.policy.load_state_dict(torch.load(model_path, map_location=self.device))
+                    print(f"Model loaded from {model_path}")
+                else:
+                    # For training, load both old and new policies
+                    self.policy.load_state_dict(torch.load(model_path, map_location=self.device))
+                    self.policy_old.load_state_dict(torch.load(model_path, map_location=self.device))
+                    print(f"Model loaded from {model_path}")
+                return True
+            except Exception as e:
+                print(f"Error loading model state_dict: {e}")
+                return False
         else:
-            print(f"Model file {path} does not exist.")
+            print(f"Model file {model_path} does not exist.")
+            return False
 
     
     def memory_prep(self, number_of_agents):
@@ -672,23 +548,6 @@ class TAAC:
             self.memories.append(Memory())
 
     
-    def set_action_bounds(self, action_low, action_high):
-        """
-        Set action bounds for continuous action spaces
-        
-        Args:
-            action_low: Lower bound for actions (scalar or array)
-            action_high: Upper bound for actions (scalar or array)
-        """
-        if self.action_space_type == "continuous":
-            self.policy.action_low = action_low
-            self.policy.action_high = action_high
-            self.policy_old.action_low = action_low
-            self.policy_old.action_high = action_high
-            print(f"Action bounds set: [{action_low}, {action_high}]")
-        else:
-            print("Warning: Action bounds only applicable for continuous action spaces")
-
     def store_experience(self, states, actions, log_probs):
         """
         Store experience in memory for training
@@ -700,67 +559,23 @@ class TAAC:
         """
         if self.mode != "train":
             return
-            
-        # Convert tensors to appropriate format for storage
-        if self.action_space_type == "discrete":
-            # actions shape: [1, num_agents] -> convert to numpy
-            actions_np = actions.squeeze(0).cpu().numpy()
-        else:  # continuous - multi-dimensional actions
-            # actions shape: [1, num_agents, action_size] -> convert to numpy
-            actions_np = actions.squeeze(0).cpu().numpy()
-            
-        log_probs_np = log_probs.squeeze(0).cpu().numpy()
-        
+
         # Store in memory for each agent
         for i in range(self.number_of_agents):
             self.memories[i].states.append(states[i])
-            
-            if self.action_space_type == "discrete":
-                self.memories[i].actions.append(actions_np[i])
-            else:  # continuous - store full action vector
-                self.memories[i].actions.append(actions_np[i])
-                
-            self.memories[i].log_probs.append(log_probs_np[i])
+            self.memories[i].actions.append(actions[f"agent_{i}"])
+            self.memories[i].log_probs.append(log_probs[f"agent_{i}"])
 
     def get_actions(self, states):
         """
-        Get actions for all agents given their states (used during training/testing)
-        
-        Args:
-            states: List of states for each agent
-            
-        Returns:
-            Dictionary of actions for each agent, entropy dictionary
+        Get actions for all agents from the current policy
         """
-        actions, log_probs, entropies = self.select_action(states)
+        with torch.no_grad():
+            actions, log_probs, entropies = self.select_action(states)
         
-        # Store experience for training
-        if self.mode == "train":
-            self.store_experience(states, actions, log_probs)
+        self.store_experience(states, actions, log_probs)
+        return actions, log_probs, entropies
         
-        # Convert to dictionary format expected by environment
-        action_dict = {}
-        entropy_dict = {}
-        
-        # Handle different tensor shapes for discrete vs continuous actions
-        if self.action_space_type == "discrete":
-            # actions shape: [1, num_agents]
-            for i in range(self.number_of_agents):
-                action_dict[f"agent_{i}"] = actions[0, i].item()
-                entropy_dict[f"agent_{i}"] = entropies[0, i].item()
-        else:  # continuous - multi-dimensional actions
-            # actions shape: [1, num_agents, action_size]
-            for i in range(self.number_of_agents):
-                if self.action_size == 1:
-                    # Single dimensional action
-                    action_dict[f"agent_{i}"] = actions[0, i, 0].item()
-                else:
-                    # Multi-dimensional action - return as numpy array
-                    action_dict[f"agent_{i}"] = actions[0, i].detach().cpu().numpy()
-                entropy_dict[f"agent_{i}"] = entropies[0, i].item()
-        
-        return action_dict, entropy_dict
-    
 
     def store_rewards(self, rewards, done):
         if self.mode != "train":

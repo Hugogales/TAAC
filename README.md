@@ -6,7 +6,7 @@ TAAC (previously HUGO - "Hierarchical Unified Generalized Optimization") is a mu
 
 - **Environment-Agnostic Design**: Works with any PettingZoo parallel environment
 - **Attention-Based Architecture**: Multi-head attention for agent coordination  
-- **Supports Both Action Types**: Discrete and continuous action spaces
+- **Discrete Action Spaces**: Optimized for discrete action environments
 - **Dynamic Network Sizing**: Automatically adapts to environment specifications
 - **Centralized Training**: Uses centralized training with decentralized execution
 - **Environment Wrappers**: Built-in support for CookingZoo, BoxJump, MATS Gym, and MPE

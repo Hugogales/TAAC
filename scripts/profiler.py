@@ -6,8 +6,8 @@ This script profiles TAAC training with 1 parallel environment and outputs
 a profile file that can be viewed with snakeviz for performance analysis.
 
 Usage:
-    python scripts/profile.py --config configs/boxjump.yaml
-    python scripts/profile.py --config configs/mpe_simple_spread.yaml --episodes 10
+    python scripts/profiler.py --config configs/boxjump.yaml
+    python scripts/profiler.py --config configs/mpe_simple_spread.yaml --episodes 10
     
 After running, view the profile with:
     pip install snakeviz
@@ -49,7 +49,7 @@ def load_config(config_path):
 
 def setup_directories():
     """Create necessary directories for profiling output."""
-    profile_dir = Path("profiles")
+    profile_dir = Path("files/profiles")
     profile_dir.mkdir(exist_ok=True)
     return profile_dir
 
@@ -185,11 +185,48 @@ def analyze_profile(profile_path, config):
         print(f"Looking for BoxJump-specific bottlenecks...")
         stats.print_stats('box.*step|box.*reset|BoxJump')
     
-    print(f"\n=== TAAC-SPECIFIC ANALYSIS ===")
-    stats.print_stats('TAAC|get_actions|update|forward')
+    # Analyze full training loop components
+    print(f"\n=== FULL TRAINING LOOP ANALYSIS ===")
     
-    print(f"\n=== PYTORCH/ML ANALYSIS ===")
-    stats.print_stats('torch.*forward|torch.*backward|nn.*forward')
+    # Main training loop functions
+    print(f"\n--- Main Training Loop ---")
+    stats.print_stats('train_taac|train_taac_parallel')
+    
+    # Environment interactions
+    print(f"\n--- Environment Interactions ---")
+    stats.print_stats('step|reset|TAACEnvironmentWrapper|ParallelEnvironmentManager')
+    
+    # Agent actions and updates
+    print(f"\n--- Agent Actions & Updates ---")
+    stats.print_stats('get_actions|update|memory_prep|store_rewards')
+    
+    # Neural network operations
+    print(f"\n=== NEURAL NETWORK OPERATIONS ===")
+    
+    # Forward passes
+    print(f"\n--- Forward Passes ---")
+    stats.print_stats('forward|actor_forward|critic_forward')
+    
+    # Backward passes
+    print(f"\n--- Backward Passes ---")
+    stats.print_stats('backward|optimizer|loss')
+    
+    # Memory operations
+    print(f"\n=== MEMORY OPERATIONS ===")
+    stats.print_stats('memory|store|compute_gae|advantages')
+    
+    # PyTorch operations
+    print(f"\n=== PYTORCH OPERATIONS ===")
+    stats.print_stats('torch')
+    
+    # Logging and evaluation
+    print(f"\n=== LOGGING & EVALUATION ===")
+    stats.print_stats('log|evaluate|plot')
+    
+    # Identify potential bottlenecks
+    print(f"\n=== POTENTIAL BOTTLENECKS ===")
+    stats.sort_stats('cumtime')
+    stats.print_stats('step|forward|backward|update|get_actions|compute_gae')
 
 
 def print_snakeviz_instructions(profile_path):
@@ -217,6 +254,74 @@ def print_snakeviz_instructions(profile_path):
     print(f"{'='*60}")
 
 
+def print_optimization_tips(stats, config):
+    """Print optimization tips based on profile analysis."""
+    print(f"\n{'='*60}")
+    print(f"OPTIMIZATION RECOMMENDATIONS")
+    print(f"{'='*60}")
+    
+    # Get top functions by total time
+    stats.sort_stats('tottime')
+    top_functions = []
+    for func in stats.stats:
+        if len(top_functions) >= 10:
+            break
+        file_path, line, func_name = func
+        # Skip built-in functions and focus on our code
+        if 'AI/' in str(file_path) or 'train_taac' in str(func_name) or 'TAAC' in str(func_name):
+            cc, nc, tt, ct, callers = stats.stats[func]
+            top_functions.append((func_name, tt))
+    
+    # Check for common bottlenecks
+    env_bottleneck = any('step' in func or 'reset' in func or 'env' in func.lower() for func, _ in top_functions)
+    network_bottleneck = any('forward' in func or 'backward' in func for func, _ in top_functions)
+    memory_bottleneck = any('memory' in func or 'store' in func or 'compute_gae' in func for func, _ in top_functions)
+    
+    # Print recommendations
+    print(f"Based on the profile analysis, here are some optimization recommendations:")
+    print(f"")
+    
+    if env_bottleneck:
+        print(f"1. ENVIRONMENT BOTTLENECKS DETECTED:")
+        print(f"   - Consider using more parallel environments (--num_parallel)")
+        print(f"   - Check for slow environment step() or reset() operations")
+        print(f"   - Look for inefficient observation/reward calculations")
+        print(f"")
+    
+    if network_bottleneck:
+        print(f"2. NEURAL NETWORK BOTTLENECKS DETECTED:")
+        print(f"   - Consider reducing network size (embedding_dim, hidden_size)")
+        print(f"   - Check for GPU utilization (torch.cuda.is_available())")
+        print(f"   - Optimize batch sizes for better GPU utilization")
+        print(f"   - Reduce number of attention heads if applicable")
+        print(f"")
+    
+    if memory_bottleneck:
+        print(f"3. MEMORY OPERATION BOTTLENECKS DETECTED:")
+        print(f"   - Consider optimizing advantage calculation")
+        print(f"   - Check for redundant tensor operations")
+        print(f"   - Use in-place operations where possible")
+        print(f"   - Optimize memory storage and retrieval")
+        print(f"")
+    
+    print(f"4. GENERAL OPTIMIZATION TIPS:")
+    print(f"   - Use PyTorch profiler for more detailed GPU analysis")
+    print(f"   - Consider vectorized operations instead of loops")
+    print(f"   - Reduce logging frequency for faster training")
+    print(f"   - Check for CPU/GPU transfers that might be slowing things down")
+    print(f"")
+    
+    # Environment-specific tips
+    env_name = config['environment']['name']
+    if env_name == 'boxjump':
+        print(f"5. BOXJUMP-SPECIFIC OPTIMIZATIONS:")
+        print(f"   - Consider simplifying physics calculations")
+        print(f"   - Reduce render frequency if applicable")
+        print(f"   - Check for Box2D bottlenecks in step() function")
+    
+    print(f"{'='*60}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='TAAC Training Profiler - Profile Performance for Optimization',
@@ -224,13 +329,13 @@ def main():
         epilog="""
 Examples:
   # Profile training with default episodes (5)
-  python scripts/profile.py --config configs/boxjump.yaml
+  python scripts/profiler.py --config configs/boxjump.yaml
   
   # Profile with specific episode count
-  python scripts/profile.py --config configs/mpe_simple_spread.yaml --episodes 10
+  python scripts/profiler.py --config configs/mpe_simple_spread.yaml --episodes 10
   
   # Profile and immediately view with snakeviz
-  python scripts/profile.py --config configs/cooking_zoo.yaml --view
+  python scripts/profiler.py --config configs/cooking_zoo.yaml --view
   
 After profiling, view results with:
   pip install snakeviz
@@ -251,6 +356,8 @@ After profiling, view results with:
                        help='Automatically open snakeviz after profiling')
     parser.add_argument('--analyze', action='store_true', default=True,
                        help='Print profile analysis (default: True)')
+    parser.add_argument('--full-loop', action='store_true', default=True,
+                       help='Profile the full training loop (default: True)')
     
     args = parser.parse_args()
     
@@ -279,13 +386,15 @@ After profiling, view results with:
         print(f"=> Episodes: {episodes}")
         print(f"=> Parallel environments: 1 (forced for profiling)")
         print(f"=> Profile output: {profile_path}")
+        print(f"=> Profiling full training loop: {args.full_loop}")
         
         # Run profiled training
         profiler = run_profiled_training(config, profile_path, args)
         
         # Analyze profile
         if args.analyze:
-            analyze_profile(profile_path, config)
+            stats = analyze_profile(profile_path, config)
+            print_optimization_tips(pstats.Stats(str(profile_path)), config)
         
         # Print snakeviz instructions
         print_snakeviz_instructions(profile_path)
