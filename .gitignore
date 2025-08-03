@@ -100,6 +100,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+containers/*
+
 
 # Jobs for slurm
 jobs/*
