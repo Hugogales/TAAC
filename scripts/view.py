@@ -94,7 +94,13 @@ Examples:
             config = load_config(args.config)
             
             # Find model path
-            model_path = find_model_path(config, args.model_path)
+            env_name = config['environment']['name']
+            if args.model_path:
+                model_path = args.model_path
+            else:
+                model_path = config.get('load_model', None)
+            
+            model_path = find_model_path(model_path, env_name)
             print(f"=> Using model: {model_path}")
             
             # Run AI visualization

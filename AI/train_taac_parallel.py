@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 """
-Parallel Environment Training script for TAAC algorithm
-Adapted from the provided parallel training structure with multiprocessing
+TAAC Parallel Training Implementation
+Handles parallel environment execution for faster training
 """
+
+import multiprocessing as mp
+import os
+import sys
+
+# Set spawn method for CUDA compatibility in multiprocessing
+# This must be done before any CUDA operations
+if __name__ == '__main__':
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        # Already set, ignore
+        pass
 
 import yaml
 import argparse
-import os
 import numpy as np
 import torch
-import torch.multiprocessing as mp
-import multiprocessing as mp_base
+import torch.multiprocessing as mp_base
 from typing import Dict, Any, List, Tuple, Optional
 import time
 from datetime import datetime
@@ -92,78 +103,107 @@ def run_single_game_parallel(args):
         (train_model, env_name, env_kwargs, max_steps) = args
         gpu_id = None
     
+    # Initialize pygame for this process if rendering is enabled
+    if env_kwargs.get('render_mode') == 'human':
+        try:
+            pygame.init()
+            pygame.display.set_caption(f"TAAC Training - Process {os.getpid()}")
+        except Exception as e:
+            print(f"Warning: Could not initialize pygame in process {os.getpid()}: {e}")
+            # Disable rendering for this process if pygame fails
+            env_kwargs = env_kwargs.copy()
+            env_kwargs['render_mode'] = None
+    
     # Set device for this process
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() and gpu_id is not None else "cpu")
     train_model.assign_device(device) if hasattr(train_model, 'assign_device') else None
     
-    # Create environment for this process
-    env_wrapper = TAACEnvironmentWrapper(env_name, **env_kwargs)
-    
-    # Reset environment
-    states, info = env_wrapper.reset()
-    train_model.memory_prep(env_wrapper.num_agents)
-    
-    episode_reward = 0
-    episode_entropies = []
-    step_count = 0
-    done = False
-    
-    # Track environment-specific metrics
-    all_states = []
-    all_rewards = []
-    all_infos = []
-    
-    while not done and step_count < max_steps:
-        # Get actions from training model
-        train_actions, train_log_probs, train_entropies = train_model.get_actions(states)
+    try:
+        # Create environment for this process
+        env_wrapper = TAACEnvironmentWrapper(env_name, **env_kwargs)
         
-        # Collect entropies for logging (every 10 steps to reduce noise)
-        if step_count % 10 == 0:
-            episode_entropies.append(train_entropies)
+        # Reset environment
+        states, info = env_wrapper.reset()
+        train_model.memory_prep(env_wrapper.num_agents)
         
-        # Step environment
-        next_states, rewards, done, env_info = env_wrapper.step(train_actions)
+        episode_reward = 0
+        episode_entropies = []
+        step_count = 0
+        done = False
         
-        # Store rewards and states for metrics (experience storage happens in get_actions)
-        train_model.store_rewards(rewards, done)
-        all_states.append(next_states)
-        all_rewards.append(rewards)
-        all_infos.append(env_info)
+        # Track environment-specific metrics
+        all_states = []
+        all_rewards = []
+        all_infos = []
         
-        # Update state and reward tracking
-        states = next_states
-        episode_reward += sum(rewards)
-        step_count += 1
+        while not done and step_count < max_steps:
+            # Get actions from training model
+            train_actions, train_log_probs, train_entropies = train_model.get_actions(states)
+            
+            # Collect entropies for logging (every 10 steps to reduce noise)
+            if step_count % 10 == 0:
+                episode_entropies.append(train_entropies)
+            
+            # Step environment
+            next_states, rewards, done, env_info = env_wrapper.step(train_actions)
+            
+            # Store rewards and states for metrics (experience storage happens in get_actions)
+            train_model.store_rewards(rewards, done)
+            all_states.append(next_states)
+            all_rewards.append(rewards)
+            all_infos.append(env_info)
+            
+            # Update state and reward tracking
+            states = next_states
+            episode_reward += sum(rewards)
+            step_count += 1
+            
+            if done:
+                break
         
-        if done:
-            break
-    
-    # Calculate normalized entropy for this episode
-    normalized_entropy = None
-    if episode_entropies:
-        avg_entropy_dict = {}
-        for agent_key in episode_entropies[0].keys():
-            avg_entropy_dict[agent_key] = np.mean([ent[agent_key] for ent in episode_entropies])
+        # Calculate normalized entropy for this episode
+        normalized_entropy = None
+        if episode_entropies:
+            avg_entropy_dict = {}
+            for agent_key in episode_entropies[0].keys():
+                avg_entropy_dict[agent_key] = np.mean([ent[agent_key] for ent in episode_entropies])
+            
+            normalized_entropy = normalize_entropy(
+                avg_entropy_dict,
+                env_wrapper.action_size
+            )
         
-        normalized_entropy = normalize_entropy(
-            avg_entropy_dict,
-            env_wrapper.action_size
-        )
+        # Extract environment-specific metrics
+        final_states = all_states[-1] if all_states else []
+        final_rewards = all_rewards[-1] if all_rewards else {}
+        final_info = all_infos[-1] if all_infos else {}
+        
+        env_metrics = extract_environment_metrics(env_name, final_states, final_rewards, final_info, all_states_history=all_states)
+        
+        # Get model memories for combining later
+        memories = train_model.memories if hasattr(train_model, 'memories') else []
+        
+        return (episode_reward, normalized_entropy, env_metrics), memories
+        
+    except Exception as e:
+        print(f"Error in parallel game process {os.getpid()}: {e}")
+        return (0.0, None, {}), []
     
-    # Extract environment-specific metrics
-    final_states = all_states[-1] if all_states else []
-    final_rewards = all_rewards[-1] if all_rewards else {}
-    final_info = all_infos[-1] if all_infos else {}
-    
-    env_metrics = extract_environment_metrics(env_name, final_states, final_rewards, final_info, all_states_history=all_states)
-    
-    # Close environment
-    env_wrapper.close()
-    
-    # Get model memories for combining later
-    memories = train_model.memories if hasattr(train_model, 'memories') else []
-    
-    return (episode_reward, normalized_entropy, env_metrics), memories
+    finally:
+        # Clean up environment
+        try:
+            if 'env_wrapper' in locals():
+                env_wrapper.close()
+        except:
+            pass
+        
+        # Clean up pygame for this process if it was initialized
+        if env_kwargs.get('render_mode') == 'human':
+            try:
+                pygame.display.quit()
+                pygame.quit()
+            except:
+                pass
 
 def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> TAAC:
     """
@@ -177,8 +217,8 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     # Save configuration
     save_config(config, log_dir)
     
-    # Initialize pygame for potential rendering
-    pygame.init()
+    # Note: Pygame initialization is handled per-process in parallel training
+    # to avoid conflicts between multiple processes
     
     print(f"=> Starting TAAC Parallel Training")
     print(f"Environment: {env_name}")
@@ -234,9 +274,11 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     start_time = time.time()
     
     print(f"\n=> Starting parallel training for {episodes} episodes...")
+    # Create multiprocessing context with spawn method for CUDA compatibility
+    ctx = mp.get_context('spawn')
     
     # Create the pool once, outside the training loop
-    with mp_base.Pool(processes=num_parallel_games) as pool:
+    with ctx.Pool(processes=num_parallel_games) as pool:
         for epoch in tqdm(range(episodes), desc="Training TAAC Parallel"):
             
             # Prepare arguments for parallel games
