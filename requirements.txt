@@ -17,9 +17,13 @@ matplotlib>=3.5.0
 pyyaml>=6.0
 tqdm>=4.64.0
 
-# BoxJump dependencies (only install if using BoxJump)
-# swig  # Required for BoxJump installation
-# Note: Install swig manually before installing BoxJump
+# BoxJump dependencies
+swig>=4.0.0
+box2d-py>=2.3.5
+pygame>=2.1.0
+# Note: box2d-py can be problematic - use conda for easier installation
+
+
 
 # Development dependencies (optional)
 jupyter>=1.0.0

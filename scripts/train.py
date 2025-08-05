@@ -56,13 +56,13 @@ def evaluate_agent(config: dict, model_path: str) -> None:
     print("\n=> Starting evaluation mode...")
     
     if not model_path or not os.path.exists(model_path):
-        raise ValueError(f"Valid model path required for evaluation: {model_path}")
+        raise ValueError("Valid model path required for evaluation: {}".format(model_path))
     
     # Create environment
     env_name = config['environment']['name']
     env_kwargs = config['environment'].get('env_kwargs', {})
     
-    print(f"=> Creating evaluation environment: {env_name}")
+    print("=> Creating evaluation environment: {}".format(env_name))
     env_wrapper = TAACEnvironmentWrapper(
         env_name, 
         apply_wrappers=config['environment'].get('apply_wrappers', True),
@@ -77,23 +77,23 @@ def evaluate_agent(config: dict, model_path: str) -> None:
     if 'model' in config:
         training_config.update(config['model'])
     
-    print(f"=> Loading model: {model_path}")
+    print("=> Loading model: {}".format(model_path))
     taac_agent = TAAC(env_config, training_config, mode="test")
     
     if not taac_agent.load_model(model_path):
-        raise RuntimeError(f"Failed to load model from: {model_path}")
+        raise RuntimeError("Failed to load model from: {}".format(model_path))
     
-    print(f"=> Model loaded successfully!")
+    print("=> Model loaded successfully!")
     
     # Run evaluation episodes
     num_eval_episodes = config.get('logging', {}).get('eval_episodes', 5)
-    print(f"=> Running {num_eval_episodes} evaluation episodes...")
+    print("=> Running {} evaluation episodes...".format(num_eval_episodes))
     
     total_rewards = []
     episode_lengths = []
     
     for episode in range(num_eval_episodes):
-        print(f"\nEvaluation Episode {episode + 1}/{num_eval_episodes}")
+        print("\nEvaluation Episode {}/{}".format(episode + 1, num_eval_episodes))
         
         states, _ = env_wrapper.reset()
         episode_reward = 0
@@ -110,19 +110,19 @@ def evaluate_agent(config: dict, model_path: str) -> None:
         total_rewards.append(episode_reward)
         episode_lengths.append(step_count)
         
-        print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}, Length = {step_count}")
+        print("  Episode {}: Reward = {:.2f}, Length = {}".format(episode + 1, episode_reward, step_count))
     
     # Print evaluation results
     import numpy as np
-    print(f"\n=> Evaluation Results:")
-    print(f"  - Mean Reward: {np.mean(total_rewards):.2f} ± {np.std(total_rewards):.2f}")
-    print(f"  - Mean Length: {np.mean(episode_lengths):.1f} ± {np.std(episode_lengths):.1f}")
-    print(f"  - Best Episode: {max(total_rewards):.2f}")
-    print(f"  - Worst Episode: {min(total_rewards):.2f}")
+    print("\n=> Evaluation Results:")
+    print("  - Mean Reward: {:.2f} ± {:.2f}".format(np.mean(total_rewards), np.std(total_rewards)))
+    print("  - Mean Length: {:.1f} ± {:.1f}".format(np.mean(episode_lengths), np.std(episode_lengths)))
+    print("  - Best Episode: {:.2f}".format(max(total_rewards)))
+    print("  - Worst Episode: {:.2f}".format(min(total_rewards)))
     
     # Clean up
     env_wrapper.close()
-    print(f"=> Evaluation complete!")
+    print("=> Evaluation complete!")
 
 
 def determine_training_mode(config: dict, args: argparse.Namespace) -> tuple:
@@ -206,13 +206,13 @@ Examples:
     
     try:
         # Load configuration
-        print(f"=> Loading configuration from: {args.config}")
+        print("=> Loading configuration from: {}".format(args.config))
         config = load_config(args.config)
         
         # Override config with command-line arguments
         if args.episodes:
             config.setdefault('training', {})['episodes'] = args.episodes
-            print(f"=> Overriding episodes to: {args.episodes}")
+            print("=> Overriding episodes to: {}".format(args.episodes))
             
         if args.render:
             config.setdefault('environment', {}).setdefault('env_kwargs', {})['render_mode'] = "human"
@@ -220,11 +220,11 @@ Examples:
             
         if args.load_model:
             config['load_model'] = args.load_model
-            print(f"=> Will load model from: {args.load_model}")
+            print("=> Will load model from: {}".format(args.load_model))
         
         if args.job_name:
             config['job_name'] = args.job_name
-            print(f"=> Will use job name: {args.job_name}")
+            print("=> Will use job name: {}".format(args.job_name))
         
         # Handle evaluation mode
         if args.eval_only:
@@ -239,7 +239,7 @@ Examples:
         use_parallel, num_parallel = determine_training_mode(config, args)
         
         if use_parallel:
-            print(f"\n=> Starting parallel training with {num_parallel} environments...")
+            print("\n=> Starting parallel training with {} environments...".format(num_parallel))
             
             # Validate parallel settings
             if num_parallel < 1:
@@ -250,22 +250,22 @@ Examples:
             train_taac_parallel(config, num_parallel_games=num_parallel)
             
         else:
-            print(f"\n=> Starting single environment training...")
+            print("\n=> Starting single environment training...")
             
             # Run single environment training
             train_taac(config)
         
-        print(f"\n=> Training completed successfully!")
+        print("\n=> Training completed successfully!")
         return 0
         
     except KeyboardInterrupt:
-        print(f"\n\nTraining interrupted by user. Exiting gracefully...")
+        print("\n\nTraining interrupted by user. Exiting gracefully...")
         return 0
         
     except Exception as e:
-        print(f"\n--- An unexpected error occurred ---")
-        print(f"Error: {e}")
-        print(f"\nFull traceback:")
+        print("\n--- An unexpected error occurred ---")
+        print("Error: {}".format(e))
+        print("\nFull traceback:")
         traceback.print_exc()
         return 1
 

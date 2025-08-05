@@ -5,16 +5,16 @@
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
 load_model: null  # Example: "files/Models/boxjump/best_model.pth"
-job_name: "boxjump_test"
+job_name: "boxjump_TAAC_01"
 
 environment:
   name: "boxjump"
   env_kwargs:
     # === CORE ENVIRONMENT SETTINGS ===
-    num_boxes: 4                    # Number of box agents (2-16). More agents = harder coordination
+    num_boxes: 6                    # Number of box agents (2-16). More agents = harder coordination
     world_width: 10                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 1500                # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep: 2048               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
@@ -42,24 +42,24 @@ environment:
     agent_one_hot: false            # Include agent ID as one-hot vector in observations
     
     # === RENDERING ===
-    render_mode: "human"                   # null = no rendering (training), "human" = PyGame window
-    #render_mode: null                   # null = no rendering (training), "human" = PyGame window
+    #render_mode: "human"                   # null = no rendering (training), "human" = PyGame window
+    render_mode: null                   # null = no rendering (training), "human" = PyGame window
     
   apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
 
 # Model Architecture - LIGHTWEIGHT FOR BOXJUMP
 model:
-  num_heads: 2                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 64                # Attention embedding dimension (reduced from 256)
-  hidden_size: 128                  # Hidden layer size for networks (reduced from 526)
+  num_heads: 4                      # Multi-head attention heads (reduced from 4)
+  embedding_dim: 128                # Attention embedding dimension (reduced from 256)
+  hidden_size: 256                  # Hidden layer size for networks (reduced from 526)
   model_name: "boxjump_taac"        # Base name for saved models
 
 # Training Configuration  
 training:
-  episodes: 100                      # Total training episodes (good for testing)
+  episodes: 100000                      # Total training episodes (good for testing)
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
   gamma: 0.995                      # Discount factor (higher for delayed tower rewards)
-  learning_rate: 0.0005             # Learning rate for Adam optimizer
+  learning_rate: 0.0001             # Learning rate for Adam optimizer
   epsilon_clip: 0.2                 # PPO clipping parameter
   K_epochs: 10                       # PPO update epochs per batch
   c_entropy: 0.05                   # Entropy coefficient for exploration
@@ -67,7 +67,7 @@ training:
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.97                         # GAE lambda parameter
   batch_size: 512                    # Training batch size (very small for stability)
-  min_learning_rate: 0.0001       # Minimum learning rate for scheduler
+  min_learning_rate: 0.00005       # Minimum learning rate for scheduler
   similarity_loss_coef: 0.0         # Cooperation loss (higher = more coordinated behavior)
   num_parallel: 4                   # Number of parallel environments (1 = single env, 4+ = parallel training)
 
@@ -75,8 +75,6 @@ training:
 logging:
   log_interval: 10                  # Log training stats every N episodes
   save_interval: 100                # Save model checkpoint every N episodes  
-  eval_interval: 50                 # Run evaluation every N episodes
-  eval_episodes: 5                  # Number of episodes per evaluation
   save_best_model: true             # Save best performing model
 
 # Output Configuration
