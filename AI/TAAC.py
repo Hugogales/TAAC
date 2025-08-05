@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Union
 from torch.distributions import Categorical
 
 
-class Memory: 
+class Memory:
     """
     This is a per agent class that stores the experience of the agent.
     It can be conbined with other episodes agents to combine the experience of all agents for parallel training.
@@ -70,7 +70,7 @@ class AttentionActorCriticNetwork(nn.Module):
 
         # Critic network
         critic_input_size = state_size + action_size  # For discrete actions
-        
+
         self.critic_embedding = nn.Sequential(
             nn.Linear(critic_input_size, self.hidden_size),
             nn.LeakyReLU(),
@@ -111,7 +111,7 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
-        
+
         action_logits = self.actor_out(attn_output) # [B, N, action_size]
         action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
         return action_probs
@@ -143,11 +143,11 @@ class AttentionActorCriticNetwork(nn.Module):
         # remove negative values
         similarity_loss = torch.clamp(similarity_loss, min=self.similarity_loss_cap)
         similarity_loss = similarity_loss.mean()
-        
+
         action_logits = self.actor_out(attn_output)
         action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
         return action_probs, similarity_loss
-
+    
     def critic_forward(self, x, action_idx):
         """
         x.shape = [batch_size, num_agents, state_dim]
@@ -247,7 +247,7 @@ class TAAC:
         """
         self.mode = mode
         self.memories = []
-        
+
         # Extract environment info
         self.state_size = env_config['state_size']
         self.action_size = env_config['action_size']
@@ -517,20 +517,16 @@ class TAAC:
     def load_model(self, model_path: str, test=False) -> bool:
         """Load the model from the specified path."""
         if os.path.exists(model_path):
-            try:
-                if test:
+            if test:
                     # For evaluation, only load the main policy
                     self.policy.load_state_dict(torch.load(model_path, map_location=self.device))
                     print(f"Model loaded from {model_path}")
-                else:
+            else:
                     # For training, load both old and new policies
                     self.policy.load_state_dict(torch.load(model_path, map_location=self.device))
                     self.policy_old.load_state_dict(torch.load(model_path, map_location=self.device))
                     print(f"Model loaded from {model_path}")
-                return True
-            except Exception as e:
-                print(f"Error loading model state_dict: {e}")
-                return False
+            return True
         else:
             print(f"Model file {model_path} does not exist.")
             return False
@@ -565,7 +561,7 @@ class TAAC:
             self.memories[i].states.append(states[i])
             self.memories[i].actions.append(actions[f"agent_{i}"])
             self.memories[i].log_probs.append(log_probs[f"agent_{i}"])
-
+    
     def get_actions(self, states):
         """
         Get actions for all agents from the current policy
@@ -575,7 +571,7 @@ class TAAC:
         
         self.store_experience(states, actions, log_probs)
         return actions, log_probs, entropies
-        
+    
 
     def store_rewards(self, rewards, done):
         if self.mode != "train":

@@ -2,6 +2,35 @@
 # Cooperative tower-building with Box2D physics simulation
 # Goal: Build the tallest tower possible by stacking boxes cooperatively
 
+# === STATE & ACTION SPACES ===
+# 
+# OBSERVATION SPACE (per agent):
+# 13-dimensional vector per agent (constant size regardless of number of agents):
+#   0: Horizontal position (0 to 1, normalized)
+#   1: Height above floor (0 = on floor, n = n boxes high)
+#   2: Velocity x-component (vx)
+#   3: Velocity y-component (vy) 
+#   4: Angle in quarter turns (-0.5 to 0.5, 0 when rotation disabled)
+#   5: Angular velocity (0 when rotation disabled)
+#   6: Raycast distance left (distance to nearest obstacle/floor)
+#   7: Raycast distance right (distance to nearest obstacle/floor)
+#   8: Raycast distance up (distance to nearest obstacle/floor)
+#   9: Raycast distance down (distance to nearest obstacle/floor)
+#   10: Can jump flag (0/1, whether agent can currently jump)
+#   11: Highest y-coordinate achieved this episode (global property)
+#   12: Time remaining (0 to 1, normalized episode progress)
+#
+# GLOBAL STATE:
+# Concatenation of all per-agent observations, but with highest y-coordinate
+# and time remaining included only once (as these are global properties).
+#
+# ACTION SPACE (per agent):
+# 4 discrete actions:
+#   0 = do nothing
+#   1 = apply force to the left
+#   2 = apply force to the right  
+#   3 = jump (only works if agent can currently jump)
+
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
 load_model: null  # Example: "files/Models/boxjump/best_model.pth"
@@ -61,15 +90,15 @@ training:
   gamma: 0.995                      # Discount factor (higher for delayed tower rewards)
   learning_rate: 0.0001             # Learning rate for Adam optimizer
   epsilon_clip: 0.2                 # PPO clipping parameter
-  K_epochs: 10                       # PPO update epochs per batch
-  c_entropy: 0.05                   # Entropy coefficient for exploration
+  K_epochs: 12                       # PPO update epochs per batch
+  c_entropy: 0.0001                   # Entropy coefficient for exploration
   max_grad_norm: 200               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.97                         # GAE lambda parameter
   batch_size: 512                    # Training batch size (very small for stability)
   min_learning_rate: 0.00005       # Minimum learning rate for scheduler
   similarity_loss_coef: 0.0         # Cooperation loss (higher = more coordinated behavior)
-  num_parallel: 4                   # Number of parallel environments (1 = single env, 4+ = parallel training)
+  num_parallel: 2                   # Number of parallel environments (1 = single env, 4+ = parallel training)
 
 # Logging & Evaluation
 logging:

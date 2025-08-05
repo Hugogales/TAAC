@@ -1,44 +1,35 @@
 #!/usr/bin/env python3
 """
-TAAC Training Script - Config-Driven Training and Evaluation
-
-This script is the main entry point for all TAAC training.
-It automatically determines whether to use single or parallel training
-based on configuration and command line arguments.
-
-Usage:
-    # Single environment training
-    python scripts/train.py --config configs/boxjump.yaml
-    
-    # Parallel training (uses config num_parallel or override)
-    python scripts/train.py --config configs/boxjump.yaml --num_parallel 8
-    
-    # Evaluation mode
-    python scripts/train.py --config configs/boxjump.yaml --eval_only --model_path files/Models/boxjump/best_model.pth
-    
-    # Training with custom job name
-    python scripts/train.py --config configs/mpe_simple_spread.yaml --job_name my_experiment --episodes 2000
+TAAC Training Script - Main Entry Point
+Handles argument parsing and routes to appropriate training functions
 """
 
-import sys
+import multiprocessing as mp
 import os
+import sys
+
+# Set spawn method for CUDA compatibility in multiprocessing
+# This must be done before any CUDA operations and before importing TAAC modules
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    # Already set, ignore
+    pass
+
+import yaml
 import argparse
 import traceback
-import yaml
+from pathlib import Path
+from typing import Dict, Any, Optional
 
 # Add the project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import training functions
-try:
-    from AI.train_taac import train_taac
-    from AI.train_taac_parallel import train_taac_parallel
-    from AI.env_wrapper import TAACEnvironmentWrapper
-    from AI.TAAC import TAAC
-except ImportError as e:
-    print("Error: Could not import training modules.")
-    print(f"Please ensure that the AI directory and training files exist: {e}")
-    sys.exit(1)
+# Import TAAC modules after setting multiprocessing method
+from AI.train_taac import train_taac
+from AI.train_taac_parallel import train_taac_parallel
+from AI.env_wrapper import TAACEnvironmentWrapper
+from AI.TAAC import TAAC
 
 
 def load_config(config_path: str) -> dict:
