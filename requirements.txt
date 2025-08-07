@@ -23,8 +23,6 @@ box2d-py>=2.3.5
 pygame>=2.1.0
 # Note: box2d-py can be problematic - use conda for easier installation
 
-
-
 # Development dependencies (optional)
 jupyter>=1.0.0
 ipython>=8.0.0

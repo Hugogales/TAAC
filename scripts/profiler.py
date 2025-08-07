@@ -24,8 +24,8 @@ import time
 from pathlib import Path
 from datetime import datetime
 
-# Add AI directory to path
-sys.path.append(str(Path(__file__).parent.parent / "AI"))
+# Add src directory to path
+sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from train_taac import main_with_args as train_main
 

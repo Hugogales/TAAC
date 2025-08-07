@@ -26,10 +26,10 @@ from typing import Dict, Any, Optional
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import TAAC modules after setting multiprocessing method
-from AI.train_taac import train_taac
-from AI.train_taac_parallel import train_taac_parallel
-from AI.env_wrapper import TAACEnvironmentWrapper
-from AI.TAAC import TAAC
+from src.train_taac import train_taac
+from src.train_taac_parallel import train_taac_parallel
+from src.env_wrapper import TAACEnvironmentWrapper
+from src.AI.TAAC import TAAC
 
 
 def load_config(config_path: str) -> dict:

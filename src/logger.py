@@ -8,6 +8,7 @@ import json
 import os
 import time
 import math
+from tqdm import tqdm
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 
@@ -142,6 +143,9 @@ class TAACLogger:
             base_str += f", Sim Loss: {similarity_loss:.4f}"
             
         print(base_str)
+
+        for i in tqdm(range(1), desc=base_str):
+            pass
         
         # Environment-specific metrics display
         if env_metrics:
@@ -176,12 +180,16 @@ class TAACLogger:
             
             if env_str.strip() != "":
                 print(env_str.rstrip(", "))
+
+                for i in tqdm(range(1), desc=env_str.rstrip(", ")):
+                    pass
     
     def log_parallel_episodes(self, 
                              rewards: List[float], 
                              entropies: List[Optional[float]] = None,
                              similarity_losses: List[Optional[float]] = None,
-                             env_metrics_list: List[Optional[Dict[str, Any]]] = None):
+                             env_metrics_list: List[Optional[Dict[str, Any]]] = None,
+                             total_experiences: Optional[int] = None):
         """Log multiple episodes from parallel environments"""
         
         # Calculate averages
@@ -216,16 +224,17 @@ class TAACLogger:
             self._log_env_specific_metrics(avg_env_metrics)
         
         # Print parallel episode summary
-        self._print_parallel_summary(avg_reward, avg_entropy, avg_similarity_loss, rewards, env_metrics_list)
+        self._print_parallel_summary(avg_reward, avg_entropy, avg_similarity_loss, rewards, env_metrics_list, total_experiences)
     
     def _print_parallel_summary(self, avg_reward: float, 
                                avg_entropy: Optional[float], avg_similarity_loss: Optional[float],
                                individual_rewards: List[float],
-                               env_metrics_list: List[Optional[Dict[str, Any]]]):
+                               env_metrics_list: List[Optional[Dict[str, Any]]],
+                               total_experiences: Optional[int] = None):
         """Print parallel episode summary"""
-        
-        base_str = f"> Parallel Episode {self.episode_count}: Avg Reward: {avg_reward:.2f}"
-        
+
+        base_str = f"> Parallel Episode {self.episode_count}: Avg Reward: {avg_reward:.2f}, Total Experiences: {total_experiences if total_experiences is not None else 'N/A'}"
+
         if avg_entropy is not None:
             base_str += f", Avg Entropy: {avg_entropy:.3f}"
         if avg_similarity_loss is not None:
@@ -233,6 +242,9 @@ class TAACLogger:
             
         print(base_str)
         print(f"   Individual Rewards: {[f'{r:.1f}' for r in individual_rewards]}")
+
+        for i in tqdm(range(1), desc=base_str + "\n   Individual Rewards: " + str([f'{r:.1f}' for r in individual_rewards])):
+            pass
         
         # Environment-specific parallel summary
         if env_metrics_list and any(m is not None for m in env_metrics_list):
@@ -240,17 +252,23 @@ class TAACLogger:
                 heights = [m.get("max_height", 0) for m in env_metrics_list if m and "max_height" in m]
                 if heights:
                     print(f"   Individual Heights: {[f'{h:.1f}' for h in heights]}")
+                    for i in tqdm(range(1), desc=f"Individual Heights: {[f'{h:.1f}' for h in heights]}"):
+                        pass
                     
             elif self.env_name == "mpe_simple_spread":
                 collisions = [m.get("collision_count", 0) for m in env_metrics_list if m and "collision_count" in m]
                 if collisions:
                     print(f"   Individual Collisions: {collisions}")
+                    for i in tqdm(range(1), desc=f"Individual Collisions: {collisions}"):
+                        pass
                     
             elif self.env_name == "cooking_zoo":
                 dishes = [m.get("dishes_completed", 0) for m in env_metrics_list if m and "dishes_completed" in m]
                 if dishes:
                     print(f"   Individual Dishes: {dishes}")
-    
+                    for i in tqdm(range(1), desc=f"Individual Dishes: {dishes}"):
+                        pass
+
     def get_recent_stats(self, window: int = 10) -> Dict[str, float]:
         """Get statistics for the most recent episodes"""
         if not self.episode_rewards:

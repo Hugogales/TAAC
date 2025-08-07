@@ -16,9 +16,10 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .TAAC import TAAC
+from .AI.TAAC import TAAC
 from .env_wrapper import TAACEnvironmentWrapper
 from .logger import extract_environment_metrics
+from tqdm import tqdm
 
 
 def normalize_entropy(entropy_dict: Dict[str, float], num_actions: int) -> float:
@@ -77,6 +78,8 @@ def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dic
     """Load a trained TAAC model."""
     
     print(f"=> Loading model from: {model_path}")
+    for i in tqdm(range(1), desc=f"Loading model {model_path}"):
+        pass
     
     # Extract environment configuration
     env_config = {

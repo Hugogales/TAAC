@@ -29,7 +29,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the core viewing functions from the AI module
 try:
-    from AI.model_viewer import load_config, find_model_path, play_game_ai, replay_game
+    from src.model_viewer import load_config, find_model_path, play_game_ai, replay_game
 except ImportError as e:
     print("Error: Could not import model viewer module.")
     print(f"Please ensure that the AI directory and model_viewer.py exist: {e}")

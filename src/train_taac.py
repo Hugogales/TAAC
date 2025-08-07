@@ -18,7 +18,7 @@ import pygame
 from tqdm import tqdm, trange
 import math
 
-from .TAAC import TAAC
+from .AI.TAAC import TAAC
 from .env_wrapper import TAACEnvironmentWrapper, create_env_config
 from .logger import TAACLogger, extract_environment_metrics, format_time
 
