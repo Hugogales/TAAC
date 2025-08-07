@@ -28,15 +28,14 @@ BASE_SAVE_DIR = "files"
 BASE_LOG_DIR = "files/experiments"
 
 
-def setup_paths(env_name: str, job_name: Optional[str] = None) -> Tuple[str, str]:
-    """Create unique directories for saving models and logs."""
-    if job_name is None:
-        job_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-    save_dir = os.path.join(BASE_SAVE_DIR, "Models", env_name, job_name)
+def setup_paths(env_name: str, job_name: str) -> Tuple[str, str]:
+    """Create unique directories for saving models and logs using standard structure."""
+    
+    # Standard directory structure: organized by environment, then by job_name
+    save_dir = os.path.join("files", "Models", env_name, job_name)
     os.makedirs(save_dir, exist_ok=True)
     
-    log_dir = os.path.join(BASE_LOG_DIR, env_name, job_name)
+    log_dir = os.path.join("files", "experiments", env_name, job_name)  
     os.makedirs(log_dir, exist_ok=True)
     
     return save_dir, log_dir

@@ -14,6 +14,7 @@ supersuit>=3.9.0
 
 # Additional utilities
 matplotlib>=3.5.0
+pandas>=1.3.0
 pyyaml>=6.0
 tqdm>=4.64.0
 

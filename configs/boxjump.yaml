@@ -1,3 +1,14 @@
+# === EXPERIMENT CONFIGURATION ===
+# Define variables here for easy version management
+# TO CREATE A NEW EXPERIMENT VERSION:
+# 1. Change job_name below (e.g., "boxjump_TAAC_09")  
+# 2. All paths will be automatically constructed from job_name!
+
+# Main experiment variables - CHANGE THESE TO CREATE NEW VERSIONS
+job_name: &job_name "boxjump_TAAC_09"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
+environment_name: &env_name "boxjump"          # Environment name
+model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
+
 # === REWARD TUNING GUIDE ===
 #
 # ADJUSTING PENALTY_FALL:
@@ -56,10 +67,10 @@
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
 load_model: null  # Example: "files/Models/boxjump/best_model.pth"
-job_name: "boxjump_TAAC_08"
+job_name: *job_name
 
 environment:
-  name: "boxjump"
+  name: *env_name
   env_kwargs:
     # === CORE ENVIRONMENT SETTINGS ===
     num_boxes: 6                    # Number of box agents (2-16). More agents = harder coordination
@@ -159,7 +170,7 @@ model:
   num_heads: 4                      # Multi-head attention heads (reduced from 4)
   embedding_dim: 256               # Attention embedding dimension (reduced from 256)
   hidden_size: 526                  # Hidden layer size for networks (reduced from 526)
-  model_name: "boxjump_taac"        # Base name for saved models
+  model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
 training:
@@ -183,12 +194,7 @@ logging:
   log_interval: 10                  # Log training stats every N episodes
   save_interval: 100                # Save model checkpoint every N episodes  
   save_best_model: true             # Save best performing model
-
-# Output Configuration
-output:
-  experiment_name: "boxjump_TAAC_08"
-  model_save_path: "files/Models/boxjump_TAAC_08/"
-  log_save_path: "experiments/boxjump_TAAC_08/"
+  stats_update_frequency: 50      # Update statistics graphs and JSON every N episodes (default: 100)
 
 # === REWARD SYSTEM ANALYSIS ===
 #

@@ -12,11 +12,17 @@ from tqdm import tqdm
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 
+try:
+    from .statistics_manager import StatisticsManager
+except ImportError:
+    from statistics_manager import StatisticsManager
+
 
 class TAACLogger:
     """Enhanced logger for tracking TAAC training metrics across different environments"""
     
-    def __init__(self, env_name: str, job_name: Optional[str] = None):
+    def __init__(self, env_name: str, job_name: Optional[str] = None, 
+                 experiment_dir: Optional[str] = None, stats_update_frequency: int = 100):
         self.env_name = env_name
         self.job_name = job_name or datetime.now().strftime("%Y%m%d_%H%M%S")
         
@@ -35,6 +41,22 @@ class TAACLogger:
         # Timing
         self.start_time = time.time()
         self.last_log_time = time.time()
+        
+        # Initialize Statistics Manager if experiment directory is provided
+        self.stats_manager = None
+        if experiment_dir:
+            try:
+                self.stats_manager = StatisticsManager(
+                    experiment_name=self.job_name,
+                    experiment_dir=experiment_dir,
+                    env_name=env_name,
+                    update_frequency=stats_update_frequency
+                )
+                print(f"Statistics Manager initialized for experiment: {self.job_name}")
+            except Exception as e:
+                print(f"Warning: Could not initialize Statistics Manager: {e}")
+                import traceback
+                traceback.print_exc()
         
     def _init_env_specific_metrics(self):
         """Initialize environment-specific metric tracking"""
@@ -225,6 +247,43 @@ class TAACLogger:
         
         # Print parallel episode summary
         self._print_parallel_summary(avg_reward, avg_entropy, avg_similarity_loss, rewards, env_metrics_list, total_experiences)
+        
+        # Update Statistics Manager
+        if self.stats_manager:
+            env_specific_stats = {}
+            if env_metrics_list:
+                # Calculate environment-specific statistics for StatisticsManager
+                for metrics in env_metrics_list:
+                    if metrics:
+                        for key, value in metrics.items():
+                            if key not in env_specific_stats:
+                                env_specific_stats[key] = []
+                            env_specific_stats[key].append(value)
+                
+                # Average the metrics
+                for key, values in env_specific_stats.items():
+                    env_specific_stats[key] = np.mean(values)
+                
+                # Add environment-specific metrics based on environment type
+                if self.env_name == "boxjump":
+                    heights = [m.get("max_height", 0) for m in env_metrics_list if m and "max_height" in m]
+                    if heights:
+                        env_specific_stats["avg_height"] = np.mean(heights)
+                        env_specific_stats["max_height_achieved"] = np.max(heights)
+                        # Calculate ratio of agents that can jump (stable)
+                        stable_count = sum(1 for h in heights if h > 2)  # Assuming height > 2 means stable
+                        env_specific_stats["stable_agents_ratio"] = stable_count / len(heights) if heights else 0
+            
+            try:
+                self.stats_manager.add_episode_metrics(
+                    episode=self.episode_count,
+                    avg_reward=avg_reward,
+                    avg_entropy=avg_entropy,
+                    avg_sim_loss=avg_similarity_loss if avg_similarity_loss is not None else 0.0,
+                    env_specific_metrics=env_specific_stats
+                )
+            except Exception as e:
+                print(f"Warning: Could not update statistics: {e}")
     
     def _print_parallel_summary(self, avg_reward: float, 
                                avg_entropy: Optional[float], avg_similarity_loss: Optional[float],

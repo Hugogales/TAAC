@@ -1,0 +1,52 @@
+# BoxJump Environment Configuration with Dense Communal Reward
+# Based on standard boxjump.yaml but using the new dense_height reward mode
+
+# Model loading (optional)
+load_model: null
+job_name: "boxjump_TAAC_dense_01"
+
+environment:
+  name: "boxjump"
+  env_kwargs:
+    # === CORE ENVIRONMENT SETTINGS ===
+    num_boxes: 6                    # Number of box agents
+    world_width: 10                 # Environment width in Box2D units
+    world_height: 6                 # Environment height in Box2D units  
+    max_timestep: 2048              # Episode length in steps
+    
+    # === BOX PHYSICS SETTINGS ===
+    box_width: 1.0                  # Width of each box agent
+    box_height: 1.0                 # Height of each box agent
+    fixed_rotation: true            # If true, boxes cannot rotate (easier)
+    gravity: 10                     # Gravity force
+    friction: 0.8                   # Friction between boxes
+    angular_damping: 1              # Prevents excessive spinning
+    
+    # === STARTING POSITIONS ===
+    spacing: 1.5                    # Horizontal spacing between boxes at start
+    random_spacing: 0.5             # Randomness in starting positions
+    
+    # === REWARD SYSTEM ===
+    # Using the new dense communal reward mode
+    reward_mode: "dense_height"     # Continuous communal reward based on current max height
+    
+    # PENALTY SYSTEM (Fall Penalty):
+    penalty_fall: 20                # Fall penalty - only applies to the falling agent
+
+logging:
+  log_interval: 25                  # Print progress every N episodes
+  save_interval: 100                # Save model every N episodes
+  
+training:
+  episodes: 5000                    # Number of episodes to train
+  update_interval: 1                # Update model after every N episodes
+  parallel: true                    # Use parallel environment training
+  mini_batch_size: 64               # Mini-batch size for PPO updates
+  K_epochs: 10                      # PPO update epochs
+  gae_lambda: 0.95                  # GAE lambda parameter
+  gamma: 0.99                       # Discount factor
+  learning_rate: 3.0e-4             # Actor-critic learning rate
+  entropy_coef: 0.01                # Entropy coefficient
+  critic_coef: 0.5                  # Critic loss coefficient
+  clip_value: 0.2                   # PPO clipping parameter
+  max_grad_norm: 0.5                # Gradient clipping threshold

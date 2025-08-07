@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-TAAC Parallel Training Implementation (Optimized with Persistent Workers)
+TAAC Parallel Training from src.AI.TAAC import TAAC, Memory
+from src.env_wrapper import TAACEnvironmentWrapper, create_env_config
+from src.logger import TAACLogger, extract_environment_metrics, format_time
+
+
+def setup_paths(env_name: str, job_name: str) -> Tuple[str, str]:ion (Optimized with Persistent Workers)
 
 This module implements efficient parallel training using persistent worker processes
 that reuse environments across multiple episodes, significantly reducing overhead
@@ -58,15 +63,14 @@ BASE_SAVE_DIR = "files"
 BASE_LOG_DIR = "files/experiments"
 
 
-def setup_paths(env_name: str, job_name: Optional[str] = None) -> Tuple[str, str]:
-    """Create unique directories for saving models and logs."""
-    if job_name is None:
-        job_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-    save_dir = os.path.join(BASE_SAVE_DIR, "Models", env_name, job_name)
+def setup_paths(env_name: str, job_name: str) -> Tuple[str, str]:
+    """Create unique directories for saving models and logs using standard structure."""
+    
+    # Standard directory structure: organized by environment, then by job_name
+    save_dir = os.path.join("files", "Models", env_name, job_name)
     os.makedirs(save_dir, exist_ok=True)
     
-    log_dir = os.path.join(BASE_LOG_DIR, env_name, job_name)
+    log_dir = os.path.join("files", "experiments", env_name, job_name)  
     os.makedirs(log_dir, exist_ok=True)
     
     return save_dir, log_dir
@@ -284,17 +288,21 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     """
     Main training loop for TAAC algorithm (parallel environments with persistent workers)
     """
-    # Setup paths and logging
+    # Extract configuration
     env_name = config['environment']['name']
-    save_dir, log_dir = setup_paths(env_name, config['job_name'])
-    actual_job_name = os.path.basename(save_dir)
+    job_name = config['job_name']
+    
+    # Setup paths using standard structure: files/{Models|experiments}/{env_name}/{job_name}/
+    save_dir, log_dir = setup_paths(env_name, job_name)
     
     # Save configuration
     save_config(config, log_dir)
     
     print(f"=> Starting TAAC Parallel Training (Persistent Workers)")
     print(f"Environment: {env_name}")
-    print(f"Job Name: {actual_job_name}")
+    print(f"Job Name: {job_name}")
+    print(f"Model Directory: {save_dir}")
+    print(f"Log Directory: {log_dir}")
     print(f"Training episodes: {config['training']['episodes']}")
     print(f"Parallel workers: {num_parallel_games}")
     
@@ -337,9 +345,10 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     max_steps = training_config.get('max_steps_per_episode', 500)
     log_interval = config['logging']['log_interval']
     save_interval = config['logging']['save_interval']
+    stats_update_frequency = config['logging'].get('stats_update_frequency', 100)
     
-    # Initialize logger
-    logger = TAACLogger(env_name, actual_job_name)
+    # Initialize logger with StatisticsManager
+    logger = TAACLogger(env_name, job_name, experiment_dir=log_dir, stats_update_frequency=stats_update_frequency)
     
     # Training variables
     start_time = time.time()
@@ -413,7 +422,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
             
             # Save checkpoint
             if (epoch + 1) % save_interval == 0:
-                checkpoint_path = os.path.join(save_dir, f"{actual_job_name}_ep{epoch + 1}.pth")
+                checkpoint_path = os.path.join(save_dir, f"{job_name}_ep{epoch + 1}.pth")
                 train_model.save_model(checkpoint_path)
     
     finally:
@@ -429,7 +438,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
                 worker.join()
     
     # Save final model
-    final_model_path = os.path.join(save_dir, f"{actual_job_name}_final.pth")
+    final_model_path = os.path.join(save_dir, f"{job_name}_final.pth")
     train_model.save_model(final_model_path)
     
     # Save final statistics
