@@ -115,10 +115,14 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
                 render_delay: float = 0.05, interactive: bool = True) -> None:
     """Run AI visualization for specified number of episodes"""
     
+    # Force to 1 episode to avoid Pygame display issues
+    episodes = 1
+    print(f"=> Running {episodes} episode to avoid Pygame display issues")
+    
     # Setup environment
     env_name = config['environment']['name']
     env_kwargs = config['environment'].get('env_kwargs', {})
-    max_steps = config['training'].get('max_steps', 1000)
+    max_steps = env_kwargs.get('max_timestep', 1000)  # Use environment max_timestep instead of training max_steps
     
     # Force rendering mode
     env_kwargs['render_mode'] = 'human'
@@ -199,6 +203,7 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
                         step_info += f", Traffic: {env_metrics['traffic_flow']:.2f}"
                     
                     print(step_info)
+                    time.sleep(render_delay)  # Control visualization speed
 
                     if dones:
                         done = True

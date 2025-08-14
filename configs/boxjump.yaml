@@ -66,17 +66,17 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
-load_model: null  # Example: "files/Models/boxjump/best_model.pth"
+load_model: "files/Models/boxjump/TAAC_001/TAAC_01_ep5100.pth"  # Path to model file to load (or null to train from scratch)
 job_name: *job_name
 
 environment:
   name: *env_name
   env_kwargs:
     # === CORE ENVIRONMENT SETTINGS ===
-    num_boxes: 6                    # Number of box agents (2-16). More agents = harder coordination
+    num_boxes: 9                    # Number of box agents (2-16). More agents = harder coordination
     world_width: 10                 # Environment width in Box2D units
-    world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 2048               # Episode length in steps (minimal to avoid indexing bug)
+    world_height: 8                 # Environment height in Box2D units  
+    max_timestep: 8048               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
