@@ -3,6 +3,7 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 import gymnasium as gym
+import math
 import copy
 import os
 from typing import Dict, Any, Optional, Union
@@ -268,16 +269,19 @@ class TAAC:
         self.max_grad_norm = float(training_config.get('max_grad_norm', 0.5))
         self.c_value = float(training_config.get('c_value', 0.5))
         self.lam = float(training_config.get('lam', 0.95))
-        self.mini_batch_size = int(training_config.get('batch_size', 64))
+        self.base_batch_size = int(training_config.get('batch_size', 64))  # Store original batch size
         self.min_learning_rate = float(training_config.get('min_learning_rate', 1e-6))
         self.episodes = int(training_config.get('episodes', 1000))
         self.similarity_loss_coef = float(training_config.get('similarity_loss_coef', 0.01))
         self.similarity_loss_cap = float(training_config.get('similarity_loss_cap', 0))
+        print(f"Similarity loss cap set to: {self.similarity_loss_cap}")
         self.num_heads = int(training_config.get('num_heads', 4))
         self.embedding_dim = int(training_config.get('embedding_dim', 256))
         self.hidden_size = int(training_config.get('hidden_size', 526))
         
-        self.mini_batch_size = int(self.mini_batch_size // self.number_of_agents)
+        # Calculate mini_batch_size dynamically based on actual agent count during update
+        self.mini_batch_size = self.base_batch_size
+        #self.mini_batch_size = min(self.base_batch_size * int(math.sqrt(self.number_of_agents)), 4098)  # Keep it manageable
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Initialize policy network and old policy network
@@ -347,13 +351,22 @@ class TAAC:
     def update(self):
         """
         B = batch size or number of timesteps
-        N = number of agents
+        N = number of agents (variable)
         G = number of games
         """
         if self.mode != "train":
             return
         
+        final_similarity_loss = torch.tensor(0.0, device=self.device)
 
+        # For dynamic agent training, we process all memories as one episode
+        # instead of chunking by fixed number of agents
+        if len(self.memories) == 0:
+            return final_similarity_loss.item()
+
+        # Determine actual number of agents from memories
+        actual_num_agents = len(self.memories)
+        
         # Combine experiences from all memories
         states = []
         actions = []
@@ -363,40 +376,60 @@ class TAAC:
         gae_returns = []
         advantages = []
 
-        for i in range(0, len(self.memories), self.number_of_agents): # for each game
-            old_states = [] # [N, B, state_size]
-            old_actions = [] # [N, B]
-            old_log_probs = [] # [N, B]
-            rewards = [] # [N, B]
-            dones = [] # [N, B]
+        # Process as one episode with variable agents
+        old_states = [] # [N, B, state_size]
+        old_actions = [] # [N, B]
+        old_log_probs = [] # [N, B]
+        rewards_list = [] # [N, B]
+        dones_list = [] # [N, B]
 
-            for j in range(self.number_of_agents): # for each agent
-                old_states.append(self.memories[i+j].states)
-                old_actions.append(self.memories[i+j].actions)
-                old_log_probs.append(self.memories[i+j].log_probs)
-                rewards.append(self.memories[i+j].rewards)
-                dones.append(self.memories[i+j].dones)
+        for j in range(actual_num_agents): # for each agent
+            if len(self.memories[j].states) > 0:  # Only add if agent has experiences
+                old_states.append(self.memories[j].states)
+                old_actions.append(self.memories[j].actions)
+                old_log_probs.append(self.memories[j].log_probs)
+                rewards_list.append(self.memories[j].rewards)
+                dones_list.append(self.memories[j].dones)
+        
+        # Skip if no agents have experiences
+        if len(old_states) == 0:
+            return final_similarity_loss.item()
             
-            # Convert lists to tensors and reshape (optimize for performance)
-            old_states = torch.from_numpy(np.array(old_states, dtype=np.float32)).permute(1, 0, 2).to(self.device) # [B, N, state_size]
-            old_actions = torch.LongTensor(old_actions).permute(1, 0).to(self.device) # [B, N]
-            old_log_probs = torch.FloatTensor(old_log_probs).permute(1, 0).to(self.device) # [B, N]
-            rewards = torch.FloatTensor(rewards).permute(1, 0).to(self.device) # [B, N]
-            dones = torch.FloatTensor(dones).permute(1, 0).to(self.device) # [B, N]
+        # Check if all sequences have the same length
+        sequence_lengths = [len(states) for states in old_states]
+        if len(set(sequence_lengths)) > 1:
+            # If sequences have different lengths, find the minimum length and truncate all to that
+            min_length = min(sequence_lengths)
+            old_states = [states[:min_length] for states in old_states]
+            old_actions = [actions[:min_length] for actions in old_actions]
+            old_log_probs = [log_probs[:min_length] for log_probs in old_log_probs]
+            rewards_list = [rewards[:min_length] for rewards in rewards_list]
+            dones_list = [dones[:min_length] for dones in dones_list]
+            
+        # Skip if sequences are empty after truncation
+        if len(old_states[0]) == 0:
+            return final_similarity_loss.item()
+            
+        # Convert lists to tensors and reshape (optimize for performance)
+        old_states = torch.from_numpy(np.array(old_states, dtype=np.float32)).permute(1, 0, 2).to(self.device) # [B, N, state_size]
+        old_actions = torch.LongTensor(old_actions).permute(1, 0).to(self.device) # [B, N]
+        old_log_probs = torch.FloatTensor(old_log_probs).permute(1, 0).to(self.device) # [B, N]
+        rewards_tensor = torch.FloatTensor(rewards_list).permute(1, 0).to(self.device) # [B, N]
+        dones_tensor = torch.FloatTensor(dones_list).permute(1, 0).to(self.device) # [B, N]
 
-            multi_agent_baseline = self.policy_old.multi_agent_baseline(old_states, old_actions) # [B, N]
-            gae_returns_tensor, advantages_tensor = self.compute_gae(rewards, dones, multi_agent_baseline) # [B, N], [B, N]
+        multi_agent_baseline = self.policy_old.multi_agent_baseline(old_states, old_actions) # [B, N]
+        gae_returns_tensor, advantages_tensor = self.compute_gae(rewards_tensor, dones_tensor, multi_agent_baseline, actual_num_agents) # [B, N], [B, N]
 
-            # Append to the combined lists
-            states.append(old_states) 
-            actions.append(old_actions)
-            log_probs.append(old_log_probs)
-            advantages.append(advantages_tensor)
-            gae_returns.append(gae_returns_tensor)
+        # Append to the combined lists
+        states.append(old_states) 
+        actions.append(old_actions)
+        log_probs.append(old_log_probs)
+        advantages.append(advantages_tensor)
+        gae_returns.append(gae_returns_tensor)
 
-            # Clear memory after processing
-            for j in range(self.number_of_agents):
-                self.memories[i+j].clear()
+        # Clear memory after processing
+        for j in range(actual_num_agents):
+            self.memories[j].clear()
 
         # Concatenate experiences from all agents
         states = torch.cat(states, dim=0) # [B*G , N, state_size]
@@ -417,8 +450,8 @@ class TAAC:
         advantages = advantages[indices]
         gae_returns = gae_returns[indices]
 
-        # Define mini-batch size
-        mini_batch_size = self.mini_batch_size  # e.g., 64
+        # Define mini-batch size dynamically based on actual agent count
+        mini_batch_size = max(1, int(self.base_batch_size // actual_num_agents))
         num_mini_batches = dataset_size // mini_batch_size
 
         # PPO policy update with mini-batching
@@ -437,6 +470,7 @@ class TAAC:
                 
                 # Forward pass
                 action_probs, similarity_loss = self.policy.actor_forward_update(mini_states) # [mini_batch_size, N, action_size]
+                final_similarity_loss = similarity_loss  # Update the final similarity loss
                 state_values_new = self.policy.critic_forward(mini_states, mini_actions) # [mini_batch_size, N]
                 dist = torch.distributions.Categorical(action_probs) # [mini_batch_size, N]
                 action_log_probs = dist.log_prob(mini_actions) # [mini_batch_size, N]
@@ -465,20 +499,25 @@ class TAAC:
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.scheduler.step()
 
-        return similarity_loss.item()
+        return final_similarity_loss.item()
 
     
-    def compute_gae(self, rewards, dones, baseline_values):
+    def compute_gae(self, rewards, dones, baseline_values, num_agents=None):
         """
         Compute returns and advantages using GAE (Generalized Advantage Estimation).
     
         :param rewards: List of rewards for an episode. # [B, N]
         :param dones: List of done flags for an episode. # [B, N]
         :param baseline_values: Tensor of state baseline_values. # [B, N]
+        :param num_agents: Number of agents (for dynamic agent support)
         :return: Tensors of returns.
         """
         if self.mode != "train":
             return
+
+        # Use provided num_agents or fall back to default
+        if num_agents is None:
+            num_agents = self.number_of_agents
 
         # reshaping
         baseline_values = baseline_values.reshape(-1) # [B*N]
@@ -505,8 +544,8 @@ class TAAC:
         returns = advantages + baseline_values
 
         #reshaping and converting to tensor [B, N]
-        returns = torch.FloatTensor(returns).reshape(-1, self.number_of_agents).to(self.device)
-        advantages = torch.FloatTensor(advantages).reshape(-1, self.number_of_agents).to(self.device)
+        returns = torch.FloatTensor(returns).reshape(-1, num_agents).to(self.device)
+        advantages = torch.FloatTensor(advantages).reshape(-1, num_agents).to(self.device)
         return returns, advantages
 
     
@@ -557,8 +596,11 @@ class TAAC:
         if self.mode != "train":
             return
 
+        # Use the actual number of states/agents in this episode instead of fixed number_of_agents
+        current_num_agents = len(states)
+        
         # Store in memory for each agent
-        for i in range(self.number_of_agents):
+        for i in range(current_num_agents):
             self.memories[i].states.append(states[i])
             self.memories[i].actions.append(actions[f"agent_{i}"])
             self.memories[i].log_probs.append(log_probs[f"agent_{i}"])
@@ -578,6 +620,7 @@ class TAAC:
         if self.mode != "train":
             return
 
+        # Use actual number of rewards instead of fixed number of agents
         for i in range(len(rewards)):
             self.memories[i].rewards.append(rewards[i])
             self.memories[i].dones.append(done)

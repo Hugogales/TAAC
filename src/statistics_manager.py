@@ -115,7 +115,6 @@ class StatisticsManager:
         """Initialize environment-specific metrics based on environment name."""
         if self.env_name == "boxjump":
             self.env_metrics = {
-                'avg_height': [],
                 'max_height_achieved': [],
                 'stable_agents_ratio': []
             }
@@ -338,8 +337,8 @@ class StatisticsManager:
             metrics_to_plot.append(('avg_sim_loss', 'Similarity Loss', 'Loss'))
         
         # Add main environment metric
-        if self.env_name == "boxjump" and len(self.env_metrics.get('avg_height', [])) > 0:
-            metrics_to_plot.append(('avg_height', 'Average Height', 'Height'))
+        if self.env_name == "boxjump" and len(self.env_metrics.get('max_height_achieved', [])) > 0:
+            metrics_to_plot.append(('max_height_achieved', 'Maximum Height Achieved', 'Max Height'))
         
         if len(metrics_to_plot) == 0:
             return
@@ -482,7 +481,6 @@ class StatisticsManager:
     def _format_metric_ylabel(self, metric_name: str) -> str:
         """Format metric name into a y-axis label."""
         ylabel_map = {
-            'avg_height': 'Height (boxes)',
             'max_height_achieved': 'Max Height (boxes)',
             'stable_agents_ratio': 'Ratio (0-1)',
             'coverage_area': 'Area Coverage',

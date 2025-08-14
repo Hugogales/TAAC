@@ -5,9 +5,28 @@
 # 2. All paths will be automatically constructed from job_name!
 
 # Main experiment variables - CHANGE THESE TO CREATE NEW VERSIONS
-job_name: &job_name "boxjump_TAAC_09"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
+job_name: &job_name "TAAC_07"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
+
+# === DYNAMIC AGENT TRAINING CONFIGURATION ===
+# This configuration enables training with variable number of agents per episode
+# The system will randomly select the number of agents for each episode from a specified list
+# Termination height is automatically adjusted based on the number of agents
+dynamic_agents:
+  enabled: true                     # Enable dynamic agent training (set to true to activate)
+  agent_counts: [2, 3, 4]  # List of possible agent counts to randomly choose from
+  
+  # Adaptive termination configuration
+  adaptive_termination:
+    enabled: true                    # Enable adaptive termination height
+    height_formula: "num_agents + 0.5"  # Formula for calculating termination height
+    base_reward: 100.0              # Base termination reward
+    
+  # Override standard environment settings when dynamic agents are enabled
+  # These will be ignored in favor of dynamic configuration
+  override_num_agents: true         # When true, ignores env_kwargs.num_boxes
+  override_termination: true        # When true, ignores env_kwargs.termination_max_height
 
 # === REWARD TUNING GUIDE ===
 #
@@ -38,7 +57,7 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 # === STATE & ACTION SPACES ===
 # 
 # OBSERVATION SPACE (per agent):
-# 13-dimensional vector per agent (constant size regardless of number of agents):
+# 12-dimensional vector per agent (constant size regardless of number of agents):
 #   0: Horizontal position (0 to 1, normalized)
 #   1: Height above floor (0 = on floor, n = n boxes high)
 #   2: Velocity x-component (vx)
@@ -50,8 +69,7 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 #   8: Raycast distance up (distance to nearest obstacle/floor)
 #   9: Raycast distance down (distance to nearest obstacle/floor)
 #   10: Can jump flag (0/1, whether agent can currently jump)
-#   11: Highest y-coordinate achieved this episode (global property)
-#   12: Time remaining (0 to 1, normalized episode progress)
+#   11: Number of boxes in the environment (useful for dynamic agents)
 #
 # GLOBAL STATE:
 # Concatenation of all per-agent observations, but with highest y-coordinate
@@ -66,17 +84,19 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
-load_model: null  # Example: "files/Models/boxjump/best_model.pth"
+load_model: "files/Models/boxjump/TAAC_02/invalid.pth"  # Path to pre-trained model (optional)
 job_name: *job_name
 
 environment:
   name: *env_name
   env_kwargs:
     # === CORE ENVIRONMENT SETTINGS ===
-    num_boxes: 6                    # Number of box agents (2-16). More agents = harder coordination
+    # NOTE: When dynamic_agents.enabled=true, num_boxes will be randomly selected
+    # from dynamic_agents.agent_counts instead of using the value below
+    num_boxes: 3                    # Number of box agents (2-16). More agents = harder coordination
     world_width: 10                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 2048               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep: 526               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
@@ -92,7 +112,7 @@ environment:
     
     # === REWARD SYSTEM ===
     # CRITICAL: Understanding the reward system is key to training success
-    reward_mode: "highest_stable_exp"          # Reward scheme - Choose based on desired behavior:
+    reward_mode: "dense_height_stable_exp"          # Reward scheme - Choose based on desired behavior:
     
     # REWARD MODE DETAILS:
     # "highest" (COOPERATIVE - recommended for multi-agent coordination):
@@ -153,10 +173,23 @@ environment:
                                     # - Falling agent gets -20/2048 = -0.00977 per step
                                     # - If fallen for 100 steps = -0.977 total penalty
                                     # - If fallen entire episode = -20.0 total penalty
+      # === EARLY TERMINATION PARAMETERS ===
+    # NOTE: When dynamic_agents.enabled=true and adaptive_termination.enabled=true,
+    # termination_max_height will be calculated as: num_agents + 0.5
+    termination_max_height: 3.5     # Terminate episode when this height is reached
+    termination_reward: 100.0       # Reward given to all agents when termination height is reached    
+    
+    # === FALL TERMINATION PARAMETERS ===
+    termination_on_fall: true      # If true, episode terminates when any agent falls off
+    penalty_fall_termination: -100.0 # Penalty given only to the fallen agent when termination_on_fall=true
+                                    # (Only applies when termination_on_fall=true)
+                                    # - Normal penalty_fall applies when termination_on_fall=false
+                                    # - This is a one-time penalty for the specific agent that caused termination
     
     # === OBSERVATION SETTINGS ===
-    include_time: true              # Include time remaining (0-1) in observations
-    include_highest: true           # Include current best height in observations
+    include_time: false              # Include time remaining (0-1) in observations
+    include_highest: false           # Include current best height in observations
+    include_num_boxes: true         # Include number of boxes in observations (useful for dynamic agents)
     agent_one_hot: false            # Include agent ID as one-hot vector in observations
     
     # === RENDERING ===
@@ -167,26 +200,27 @@ environment:
 
 # Model Architecture - LIGHTWEIGHT FOR BOXJUMP
 model:
-  num_heads: 4                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 256               # Attention embedding dimension (reduced from 256)
-  hidden_size: 526                  # Hidden layer size for networks (reduced from 526)
+  num_heads: 8                      # Multi-head attention heads (reduced from 4)
+  embedding_dim: 128               # Attention embedding dimension (reduced from 256)
+  hidden_size: 256                  # Hidden layer size for networks (reduced from 526)
   model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
 training:
   episodes: 100000                      # Total training episodes (good for testing)
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
-  gamma: 0.995                      # Discount factor (higher for delayed tower rewards)
-  learning_rate: 50e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.1                 # PPO clipping parameter
-  K_epochs: 25                      # PPO update epochs per batch
+  gamma: 0.985                 # Discount factor (higher for delayed tower rewards)
+  learning_rate: 5e-5             # Learning rate for Adam optimizer
+  epsilon_clip: 0.15                 # PPO clipping parameter
+  K_epochs: 10                   # PPO update epochs per batch
   c_entropy: 0.0001                   # Entropy coefficient for exploration
-  max_grad_norm: 200               # Gradient clipping norm
+  max_grad_norm: 10               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
-  lam: 0.99                         # GAE lambda parameter
-  batch_size: 2048                    # Training batch size (very small for stability)
+  lam: 0.98                         # GAE lambda parameter
+  batch_size: 128                    # Training batch size 
   min_learning_rate: 1e-5       # Minimum learning rate for scheduler
-  similarity_loss_coef: 0.0         # Cooperation loss (higher = more coordinated behavior)
+  similarity_loss_coef: 0.0001         # Cooperation loss (higher = more coordinated behavior)
+  similarity_loss_cap: 0.5          # Max cap for similarity loss to prevent instability
   num_parallel: 4                   # Number of parallel environments (1 = single env, 4+ = parallel training)
 
 # Logging & Evaluation
@@ -269,6 +303,21 @@ logging:
 #   +1 if include_highest: false
 #   +1 if include_time: false  
 #   +num_boxes if agent_one_hot: true
+
+# === DYNAMIC AGENT TRAINING USAGE ===
+# To enable dynamic agent training:
+# 1. Set dynamic_agents.enabled: true
+# 2. Configure agent_counts with desired range (e.g., [2, 3, 4, 5, 6, 7, 8])
+# 3. Enable adaptive_termination if you want termination height to scale with agent count
+# 4. The system will randomly select agent count for each episode
+# 5. Model will be sized for the maximum agent count in the list
+# 6. Termination height will be calculated as: num_agents + 0.5 (if adaptive)
+#
+# Benefits:
+# - Trains a single model that works well with varying team sizes
+# - Improves generalization and robustness
+# - Especially effective for BoxJump where optimal tower height scales with team size
+# - Can discover strategies that work across different cooperation scenarios
 
 # === TRAINING TIPS ===
 # 1. Start with fixed_rotation=true for faster initial learning

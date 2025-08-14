@@ -2,6 +2,7 @@ import os
 import sys
 import importlib
 import numpy as np
+import random
 from typing import Dict, List, Any, Tuple, Optional
 from pettingzoo.utils.env import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
@@ -284,21 +285,41 @@ def extract_env_info(env: ParallelEnv) -> Dict[str, Any]:
 
 class TAACEnvironmentWrapper:
     """
-    Wrapper to standardize different PettingZoo environments for TAAC
+    Wrapper for environments to be compatible with TAAC training.
+    Handles dynamic agent configuration for variable agent count training.
     """
     
-    def __init__(self, env_name: str, apply_wrappers: bool = True, **env_kwargs):
+    def __init__(self, env_name: str, apply_wrappers: bool = True, dynamic_config: Optional[Dict] = None, **env_kwargs):
         """
-        Initialize environment wrapper
+        Initialize the environment wrapper
         
         Args:
             env_name: Name of the environment
-            apply_wrappers: Whether to apply SuperSuit wrappers for standardization
-            **env_kwargs: Additional environment parameters
+            apply_wrappers: Whether to apply PettingZoo wrappers
+            dynamic_config: Configuration for dynamic agent training
+            **env_kwargs: Environment-specific parameters
         """
         self.env_name = env_name
+        self.dynamic_config = dynamic_config or {}
+        self.original_env_kwargs = env_kwargs.copy()
+        
+        # Handle dynamic agent configuration
+        self.current_agent_count = None
+        self.current_termination_height = None
+        if self._is_dynamic_agent_enabled():
+            self._setup_dynamic_agents()
+        else:
+            # Use static configuration
+            env_kwargs = self._prepare_env_kwargs(env_kwargs)
+            
+        # Create environment
         self.env = make_env(env_name, **env_kwargs)
         self.original_env = self.env
+        
+        # Store BoxJump-specific termination parameters
+        self.termination_max_height = env_kwargs.get('termination_max_height', None)
+        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self._episode_terminated = False  # Track if episode has been terminated early
         
         # Apply standardization wrappers if requested
         if apply_wrappers:
@@ -313,6 +334,96 @@ class TAACEnvironmentWrapper:
         self.state_size = self.env_info['state_size']
         self.action_size = self.env_info['action_size'] 
         self.action_space_type = self.env_info['action_space_type']
+        
+    def _is_dynamic_agent_enabled(self) -> bool:
+        """Check if dynamic agent training is enabled"""
+        return (self.dynamic_config.get('enabled', False) and 
+                'agent_counts' in self.dynamic_config and 
+                len(self.dynamic_config['agent_counts']) > 0)
+    
+    def _setup_dynamic_agents(self):
+        """Setup dynamic agent configuration"""
+        # Randomly select number of agents for this environment instance
+        agent_counts = self.dynamic_config['agent_counts']
+        self.current_agent_count = random.choice(agent_counts)
+        
+        # Calculate adaptive termination height if enabled
+        adaptive_config = self.dynamic_config.get('adaptive_termination', {})
+        if adaptive_config.get('enabled', False):
+            height_formula = adaptive_config.get('height_formula', 'num_agents + 0.5')
+            # Simple formula evaluation (only supports num_agents + number format)
+            if 'num_agents' in height_formula:
+                # Extract the addition/subtraction part
+                formula_parts = height_formula.replace('num_agents', str(self.current_agent_count))
+                try:
+                    self.current_termination_height = eval(formula_parts)
+                except:
+                    # Fallback to simple addition
+                    self.current_termination_height = self.current_agent_count + 0.5
+            else:
+                self.current_termination_height = float(height_formula)
+        
+    def _prepare_env_kwargs(self, env_kwargs: Dict) -> Dict:
+        """Prepare environment kwargs with dynamic configuration"""
+        if not self._is_dynamic_agent_enabled():
+            return env_kwargs
+            
+        # Override environment parameters for dynamic agent training
+        if self.dynamic_config.get('override_num_agents', True):
+            if self.env_name == 'boxjump':
+                env_kwargs['num_boxes'] = self.current_agent_count
+            else:
+                env_kwargs['num_agents'] = self.current_agent_count
+                
+        if (self.dynamic_config.get('override_termination', True) and 
+            self.current_termination_height is not None):
+            env_kwargs['termination_max_height'] = self.current_termination_height
+            # Also set termination reward if specified
+            adaptive_config = self.dynamic_config.get('adaptive_termination', {})
+            if 'base_reward' in adaptive_config:
+                env_kwargs['termination_reward'] = adaptive_config['base_reward']
+                
+        return env_kwargs
+    
+    def get_current_config(self) -> Dict:
+        """Get current dynamic configuration info"""
+        return {
+            'agent_count': self.current_agent_count,
+            'termination_height': self.current_termination_height,
+            'termination_reward': self.termination_reward,
+            'dynamic_enabled': self._is_dynamic_agent_enabled()
+        }
+    
+    def reset_with_new_agents(self):
+        """Reset the environment with a new random agent count"""
+        if not self._is_dynamic_agent_enabled():
+            return self.reset()
+            
+        # Setup new dynamic configuration
+        self._setup_dynamic_agents()
+        
+        # Recreate environment with new configuration
+        env_kwargs = self._prepare_env_kwargs(self.original_env_kwargs.copy())
+        
+        # Close current environment
+        self.close()
+        
+        # Create new environment
+        self.env = make_env(self.env_name, **env_kwargs)
+        self.original_env = self.env
+        
+        # Update termination parameters
+        self.termination_max_height = env_kwargs.get('termination_max_height', None)
+        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self._episode_terminated = False
+        
+        # Re-extract environment information
+        self.env_info = extract_env_info(self.env)
+        self.agents = self.env_info['agents']
+        self.num_agents = self.env_info['num_agents']
+        
+        # Return reset state
+        return self.reset()
         
     def _apply_wrappers(self):
         """Apply SuperSuit wrappers for observation and action space standardization"""
@@ -329,6 +440,9 @@ class TAACEnvironmentWrapper:
             
     def reset(self) -> Tuple[List[np.ndarray], Dict]:
         """Reset environment and return states in TAAC format"""
+        # Reset termination flag
+        self._episode_terminated = False
+        
         observations, info = self.env.reset()
         
         # Convert to list format expected by TAAC
@@ -383,6 +497,13 @@ class TAACEnvironmentWrapper:
         Returns:
             states, rewards, done, info
         """
+        # If episode has already been terminated, return terminal state immediately
+        if self._episode_terminated:
+            # Return terminal state without any further computation
+            states = [np.zeros(self.env_info['state_size']) for _ in range(self.num_agents)]
+            rewards = [0.0] * self.num_agents
+            return states, rewards, True, {'early_termination': True, 'already_terminated': True}
+        
         # Convert TAAC actions to environment format
         env_actions = {}
         for i, agent in enumerate(self.agents):
@@ -452,21 +573,75 @@ class TAACEnvironmentWrapper:
     def _step_boxjump(self, env_actions: Dict[str, int]) -> Tuple[Dict, Dict, Dict, Dict]:
         """Step method specifically for BoxJump environment"""
         try:
-            # Call the BoxJump environment directly without converters
+            # Access the actual BoxJump environment through the wrapper
+            actual_boxjump_env = self.original_env.env if hasattr(self.original_env, 'env') else self.original_env
+            
+            # Check for early termination BEFORE stepping the environment
+            # This prevents unnecessary computation after success
+            if (self.termination_max_height is not None and 
+                hasattr(actual_boxjump_env, 'highest_y') and 
+                actual_boxjump_env.highest_y >= self.termination_max_height):
+                
+                # Episode should have already terminated - return terminal state
+                # Get current observations without stepping
+                current_obs = actual_boxjump_env.get_all_obs()
+                
+                # Create terminal rewards and dones
+                rewards = {}
+                dones = {}
+                for agent in current_obs.keys():
+                    dones[agent] = True
+                    rewards[agent] = self.termination_reward
+                
+                # Set termination flag to prevent further steps
+                self._episode_terminated = True
+                
+                # Create terminal info
+                info = {
+                    'termination_reason': 'max_height_reached',
+                    'final_height': actual_boxjump_env.highest_y,
+                    'early_termination': True
+                }
+                
+                return current_obs, rewards, dones, info
+            
+            # Normal environment step
             result = self.original_env.step(env_actions)
             
             if len(result) == 4:
                 # BoxJump returns 4 values: observations, rewards, dones, info
                 observations, rewards, dones, info = result
-                return observations, rewards, dones, info
             elif len(result) == 5:
                 # Handle 5-value return by combining terminations and truncations
                 observations, rewards, terminations, truncations, info = result
                 dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
                         for agent in observations.keys()}
-                return observations, rewards, dones, info
             else:
                 raise ValueError(f"BoxJump returned unexpected number of values: {len(result)}")
+            
+            # Check for early termination due to max height reached AFTER this step
+            if (self.termination_max_height is not None and 
+                hasattr(actual_boxjump_env, 'highest_y') and 
+                actual_boxjump_env.highest_y >= self.termination_max_height):
+                
+                # Set all agents as done (terminate episode)
+                for agent in observations.keys():
+                    dones[agent] = True
+                
+                # Give termination reward to all agents (override regular rewards)
+                if self.termination_reward != 0.0:
+                    for agent in observations.keys():
+                        rewards[agent] = self.termination_reward
+                
+                # Set termination flag to prevent further steps
+                self._episode_terminated = True
+                
+                # Add termination info
+                info['termination_reason'] = 'max_height_reached'
+                info['final_height'] = actual_boxjump_env.highest_y
+                info['early_termination'] = True
+                
+            return observations, rewards, dones, info
                 
         except Exception as e:
             print(f"Error in BoxJump step, falling back to wrapped environment: {e}")
@@ -566,23 +741,56 @@ class TAACEnvironmentWrapper:
         self.env.close()
 
 
-def create_env_config(env_name: str, **env_kwargs) -> Dict[str, Any]:
+def create_env_config(env_name: str, dynamic_config: Optional[Dict] = None, **env_kwargs) -> Dict[str, Any]:
     """
-    Create environment configuration for TAAC
+    Create environment configuration for TAAC with dynamic agent support
     
     Args:
         env_name: Name of the environment
+        dynamic_config: Configuration for dynamic agent training
         **env_kwargs: Additional environment parameters
         
     Returns:
         Environment configuration dictionary
     """
     # Create temporary environment to extract specs
-    temp_env = TAACEnvironmentWrapper(env_name, **env_kwargs)
+    temp_env = TAACEnvironmentWrapper(env_name, dynamic_config=dynamic_config, **env_kwargs)
     env_config = temp_env.env_info.copy()
+    
+    # Add dynamic configuration info if applicable
+    if dynamic_config and dynamic_config.get('enabled', False):
+        env_config['dynamic_config'] = temp_env.get_current_config()
+    
     temp_env.close()
     
     return env_config
+
+
+def create_dynamic_environment_wrapper(env_name: str, config: Dict[str, Any]) -> TAACEnvironmentWrapper:
+    """
+    Create an environment wrapper with dynamic agent configuration
+    
+    Args:
+        env_name: Name of the environment
+        config: Full configuration dictionary including dynamic_agents section
+        
+    Returns:
+        TAACEnvironmentWrapper instance with dynamic configuration
+    """
+    # Extract dynamic configuration
+    dynamic_config = config.get('dynamic_agents', {})
+    
+    # Extract environment kwargs
+    env_kwargs = config.get('environment', {}).get('env_kwargs', {})
+    apply_wrappers = config.get('environment', {}).get('apply_wrappers', True)
+    
+    # Create wrapper with dynamic configuration
+    return TAACEnvironmentWrapper(
+        env_name=env_name,
+        apply_wrappers=apply_wrappers,
+        dynamic_config=dynamic_config,
+        **env_kwargs
+    )
 
 
 # Predefined environment configurations
@@ -608,7 +816,9 @@ ENV_CONFIGS = {
             'num_boxes': 4,  # Number of box agents (2-16)
             'fixed_rotation': True,  # Disable rotation for easier coordination
             'render_mode': None,  # None for training, "human" for visualization
-            'max_timestep': 500  # BoxJump uses max_timestep, not max_cycles
+            'max_timestep': 500,  # BoxJump uses max_timestep, not max_cycles
+            'termination_max_height': 10.0,  # Terminate episode when this height is reached
+            'termination_reward': 100.0  # Final reward given to all agents when max height is reached
         },
         'training_config': {
             'gamma': 0.995,  # Higher gamma for delayed tower-building rewards
