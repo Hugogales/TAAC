@@ -44,6 +44,7 @@ import argparse
 import numpy as np
 import torch
 import torch.multiprocessing as mp_base
+import random
 from typing import Dict, Any, List, Tuple, Optional
 import time
 from datetime import datetime
@@ -117,10 +118,11 @@ def normalize_entropy(entropy_dict: Dict[str, float], num_actions: int) -> float
 
 
 class PersistentWorker:
-    """Persistent worker process that reuses environment for multiple episodes"""
+    """Persistent worker process that reuses environment for multiple episodes with dynamic agent support"""
     
     def __init__(self, worker_id: int, env_name: str, env_kwargs: Dict, max_steps: int, 
-                 env_config: Dict, training_config: Dict, gpu_id: Optional[int] = None):
+                 env_config: Dict, training_config: Dict, gpu_id: Optional[int] = None, 
+                 dynamic_config: Optional[Dict] = None):
         self.worker_id = worker_id
         self.env_name = env_name
         self.env_kwargs = env_kwargs.copy()
@@ -128,9 +130,11 @@ class PersistentWorker:
         self.gpu_id = gpu_id
         self.env_config = env_config
         self.training_config = training_config
+        self.dynamic_config = dynamic_config or {}
         self.env_wrapper = None
         self.device = None
         self.model = None
+        self.max_agents = None  # Track maximum number of agents for memory allocation
         
         # Initialize environment, device, and model
         self._setup_worker()
@@ -152,31 +156,72 @@ class PersistentWorker:
         # Set device for this process
         self.device = torch.device(f"cuda:{self.gpu_id}" if torch.cuda.is_available() and self.gpu_id is not None else "cpu")
         
+        # Determine maximum number of agents for memory allocation
+        if self.dynamic_config.get('enabled', False):
+            agent_counts = self.dynamic_config.get('agent_counts', [])
+            self.max_agents = max(agent_counts) if agent_counts else self.env_config['num_agents']
+            print(f"🔧 Dynamic Agent Config: Agent counts {agent_counts}, Max agents: {self.max_agents}")
+        else:
+            self.max_agents = self.env_config['num_agents']
+        
         # Create environment for this worker
-        self.env_wrapper = TAACEnvironmentWrapper(self.env_name, **self.env_kwargs)
+        self.env_wrapper = TAACEnvironmentWrapper(
+            self.env_name, 
+            dynamic_config=self.dynamic_config, 
+            **self.env_kwargs
+        )
+        
+        # Use configuration with maximum number of agents for model creation
+        model_env_config = self.env_config.copy()
+        model_env_config['num_agents'] = self.max_agents
         
         # Create model for this worker
-        self.model = TAAC(self.env_config, self.training_config, mode="train")
+        self.model = TAAC(model_env_config, self.training_config, mode="train")
         if hasattr(self.model, 'assign_device'):
             self.model.assign_device(self.device)
         
         print(f"Worker {self.worker_id} initialized successfully on {self.device}")
     
-    def run_episode(self, model_state_dict: Dict, episode_num: int) -> Tuple[Tuple[float, Optional[float], Dict], List]:
-        """Run a single episode with the given model state"""
+    def run_episode(self, model_state_dict: Dict, episode_num: int, agent_count: Optional[int] = None, 
+                   termination_height: Optional[float] = None) -> Tuple[Tuple[float, Optional[float], Dict], List]:
+        """Run a single episode with the given model state, potentially with specified agent count"""
         # Update model with new state dict
         if model_state_dict:
             try:
                 self.model.load_state_dict(model_state_dict)
             except Exception as e:
                 print(f"Warning: Could not load state dict in worker {self.worker_id}: {e}")
+        
+        # If agent count is specified, recreate environment with that count
+        if agent_count is not None and self.dynamic_config.get('enabled', False):
+            # Update environment kwargs with specified agent count
+            updated_env_kwargs = self.env_kwargs.copy()
+            if self.env_name == 'boxjump':
+                updated_env_kwargs['num_boxes'] = agent_count
+            else:
+                updated_env_kwargs['num_agents'] = agent_count
+                
+            # Update termination height if specified
+            if termination_height is not None:
+                updated_env_kwargs['termination_max_height'] = termination_height
+                if 'termination_reward' not in updated_env_kwargs:
+                    adaptive_config = self.dynamic_config.get('adaptive_termination', {})
+                    updated_env_kwargs['termination_reward'] = adaptive_config.get('base_reward', 100.0)
             
+            # Close current environment and create new one
+            if self.env_wrapper:
+                self.env_wrapper.close()
+                
+            self.env_wrapper = TAACEnvironmentWrapper(self.env_name, **updated_env_kwargs)
+            print(f"Worker {self.worker_id}: Episode {episode_num} - Recreated env with {agent_count} agents")
+        
         # Reset environment
         states, info = self.env_wrapper.reset()
             
         # Ensure memory is properly prepared for this episode
-        self.model.memory_prep(self.env_wrapper.num_agents)
-        print(f"Worker {self.worker_id}: num memories = {len(self.model.memories)} for {self.env_wrapper.num_agents} agents")
+        current_num_agents = self.env_wrapper.num_agents
+        self.model.memory_prep(current_num_agents)
+        print(f"Worker {self.worker_id}: num memories = {len(self.model.memories)} for {current_num_agents} agents")
             
         episode_reward = 0
         episode_entropies = []
@@ -261,19 +306,30 @@ class PersistentWorker:
 
 def worker_process(worker_id: int, env_name: str, env_kwargs: Dict, max_steps: int, 
                   env_config: Dict, training_config: Dict, gpu_id: Optional[int], 
-                  task_queue, result_queue):
+                  task_queue, result_queue, dynamic_config: Optional[Dict] = None):
     """Persistent worker process function"""
     worker = PersistentWorker(worker_id, env_name, env_kwargs, max_steps, 
-                             env_config, training_config, gpu_id)
+                             env_config, training_config, gpu_id, dynamic_config)
     
     try:
         while True:
             task = task_queue.get()
             if task is None:  # Shutdown signal
                 break
+            
+            # Handle both old format (tuple) and new format (dict)
+            if isinstance(task, dict):
+                model_state_dict = task['model_state_dict']
+                episode_num = task['episode_num']
+                agent_count = task.get('agent_count')
+                termination_height = task.get('termination_height')
+            else:
+                # Old format for backward compatibility
+                model_state_dict, episode_num = task
+                agent_count = None
+                termination_height = None
                 
-            model_state_dict, episode_num = task
-            result = worker.run_episode(model_state_dict, episode_num)
+            result = worker.run_episode(model_state_dict, episode_num, agent_count, termination_height)
             result_queue.put((worker_id, result))
             
     except Exception as e:
@@ -287,10 +343,12 @@ def worker_process(worker_id: int, env_name: str, env_kwargs: Dict, max_steps: i
 def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> TAAC:
     """
     Main training loop for TAAC algorithm (parallel environments with persistent workers)
+    Supports dynamic agent training with variable agent counts per episode.
     """
     # Extract configuration
     env_name = config['environment']['name']
     job_name = config['job_name']
+    dynamic_config = config.get('dynamic_agents', {})
     
     # Setup paths using standard structure: files/{Models|experiments}/{env_name}/{job_name}/
     save_dir, log_dir = setup_paths(env_name, job_name)
@@ -306,16 +364,33 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     print(f"Training episodes: {config['training']['episodes']}")
     print(f"Parallel workers: {num_parallel_games}")
     
-    # Create sample environment to get info
+    # Print dynamic agent configuration
+    if dynamic_config.get('enabled', False):
+        agent_counts = dynamic_config.get('agent_counts', [])
+        print(f"🎲 Dynamic Agent Training ENABLED:")
+        print(f"   Agent counts: {agent_counts}")
+        if dynamic_config.get('adaptive_termination', {}).get('enabled', False):
+            height_formula = dynamic_config.get('adaptive_termination', {}).get('height_formula', 'num_agents + 0.5')
+            print(f"   Adaptive termination: {height_formula}")
+    
+    # Create sample environment to get info (with dynamic config if enabled)
     sample_env = TAACEnvironmentWrapper(
         env_name, 
         apply_wrappers=config['environment'].get('apply_wrappers', True),
+        dynamic_config=dynamic_config,
         **config['environment'].get('env_kwargs', {})
     )
     
     # Environment info
     env_config = sample_env.env_info
     training_config = config['training'].copy()
+    
+    # For dynamic agent training, use maximum agent count for model initialization
+    if dynamic_config.get('enabled', False):
+        agent_counts = dynamic_config.get('agent_counts', [])
+        max_agents = max(agent_counts) if agent_counts else env_config['num_agents']
+        env_config['num_agents'] = max_agents
+        print(f"   Model will be sized for maximum {max_agents} agents")
     
     # Merge model configuration
     if 'model' in config:
@@ -369,7 +444,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
         worker = ctx.Process(
             target=worker_process,
             args=(i, env_name, config['environment'].get('env_kwargs', {}), 
-                  max_steps, env_config, training_config, gpu_id, task_queue, result_queue)
+                  max_steps, env_config, training_config, gpu_id, task_queue, result_queue, dynamic_config)
         )
         worker.start()
         workers.append(worker)
@@ -380,10 +455,39 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
         # Training loop
         for epoch in tqdm(range(episodes), desc="Training TAAC Parallel"):
             
+            # For dynamic agent training, select agent count for this epoch
+            current_agent_count = None
+            current_termination_height = None
+            if dynamic_config.get('enabled', False):
+                agent_counts = dynamic_config.get('agent_counts', [])
+                current_agent_count = random.choice(agent_counts)
+                print(f"\n🎲 Episode {epoch + 1}: Using {current_agent_count} agents")
+                
+                # Calculate adaptive termination if enabled
+                adaptive_config = dynamic_config.get('adaptive_termination', {})
+                if adaptive_config.get('enabled', False):
+                    height_formula = adaptive_config.get('height_formula', 'num_agents + 0.5')
+                    if 'num_agents' in height_formula:
+                        formula_parts = height_formula.replace('num_agents', str(current_agent_count))
+                        try:
+                            current_termination_height = eval(formula_parts)
+                        except:
+                            current_termination_height = current_agent_count + 0.5
+                    else:
+                        current_termination_height = float(height_formula)
+                    print(f"   Termination height: {current_termination_height}")
+            
             # Send tasks to workers (one episode per worker)
             model_state_dict = train_model.state_dict()
             for i in range(num_parallel_games):
-                task_queue.put((model_state_dict, epoch))
+                # Include current agent count and termination height in task
+                task_data = {
+                    'model_state_dict': model_state_dict,
+                    'episode_num': epoch,
+                    'agent_count': current_agent_count,
+                    'termination_height': current_termination_height
+                }
+                task_queue.put(task_data)
             
             # Collect results from workers
             parallel_rewards = []

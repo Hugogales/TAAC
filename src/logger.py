@@ -32,7 +32,6 @@ class TAACLogger:
         self.episode_lengths = []
         self.normalized_entropies = []
         self.similarity_losses = []
-        self.elo_ratings = []
         
         # Environment-specific metrics
         self.env_specific_metrics = {}
@@ -216,17 +215,14 @@ class TAACLogger:
         
         # Calculate averages
         avg_reward = np.mean(rewards)
-        avg_entropy = np.mean([e for e in entropies if e is not None]) if entropies and any(e is not None for e in entropies) else None
-        avg_similarity_loss = np.mean([s for s in similarity_losses if s is not None]) if similarity_losses and any(s is not None for s in similarity_losses) else None
+        avg_entropy = np.mean([e for e in entropies]) 
+        avg_similarity_loss = np.mean([s for s in similarity_losses]) 
         
         # Update counters
         self.episode_count += 1
         self.episode_rewards.append(avg_reward)
-        
-        if avg_entropy is not None:
-            self.normalized_entropies.append(avg_entropy)
-        if avg_similarity_loss is not None:
-            self.similarity_losses.append(avg_similarity_loss)
+        self.normalized_entropies.append(avg_entropy)
+        self.similarity_losses.append(avg_similarity_loss)
         
         # Handle environment-specific metrics
         if env_metrics_list:
@@ -266,20 +262,18 @@ class TAACLogger:
                 
                 # Add environment-specific metrics based on environment type
                 if self.env_name == "boxjump":
-                    heights = [m.get("max_height", 0) for m in env_metrics_list if m and "max_height" in m]
-                    if heights:
-                        env_specific_stats["avg_height"] = np.mean(heights)
-                        env_specific_stats["max_height_achieved"] = np.max(heights)
-                        # Calculate ratio of agents that can jump (stable)
-                        stable_count = sum(1 for h in heights if h > 2)  # Assuming height > 2 means stable
-                        env_specific_stats["stable_agents_ratio"] = stable_count / len(heights) if heights else 0
+                    max_heights = [m.get("max_height") for m in env_metrics_list] 
+                    env_specific_stats["max_height_achieved"] = np.max(max_heights)
+                    # Calculate ratio of agents that can jump (stable)
+                    stable_count = sum(1 for h in max_heights if h > 2)  # Assuming height > 2 means stable
+                    env_specific_stats["stable_agents_ratio"] = stable_count / len(max_heights) 
             
             try:
                 self.stats_manager.add_episode_metrics(
                     episode=self.episode_count,
                     avg_reward=avg_reward,
                     avg_entropy=avg_entropy,
-                    avg_sim_loss=avg_similarity_loss if avg_similarity_loss is not None else 0.0,
+                    avg_sim_loss=avg_similarity_loss,
                     env_specific_metrics=env_specific_stats
                 )
             except Exception as e:
@@ -308,10 +302,10 @@ class TAACLogger:
         # Environment-specific parallel summary
         if env_metrics_list and any(m is not None for m in env_metrics_list):
             if self.env_name == "boxjump":
-                heights = [m.get("max_height", 0) for m in env_metrics_list if m and "max_height" in m]
-                if heights:
-                    print(f"   Individual Heights: {[f'{h:.1f}' for h in heights]}")
-                    for i in tqdm(range(1), desc=f"Individual Heights: {[f'{h:.1f}' for h in heights]}"):
+                max_heights = [m.get("max_height", 0) for m in env_metrics_list if m and "max_height" in m]
+                if max_heights:
+                    print(f"   Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}")
+                    for i in tqdm(range(1), desc=f"Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}"):
                         pass
                     
             elif self.env_name == "mpe_simple_spread":
@@ -337,7 +331,6 @@ class TAACLogger:
         recent_lengths = self.episode_lengths[-window:]
         recent_entropies = self.normalized_entropies[-window:] if self.normalized_entropies else []
         recent_similarities = self.similarity_losses[-window:] if self.similarity_losses else []
-        recent_elos = self.elo_ratings[-window:] if self.elo_ratings else []
         
         stats = {
             'avg_reward': np.mean(recent_rewards),
@@ -358,12 +351,6 @@ class TAACLogger:
                 'std_similarity_loss': np.std(recent_similarities),
             })
             
-        if recent_elos:
-            stats.update({
-                'avg_elo': np.mean(recent_elos),
-                'std_elo': np.std(recent_elos),
-            })
-        
         # Add environment-specific recent stats
         for metric_name, values in self.env_specific_metrics.items():
             if values:
@@ -392,8 +379,8 @@ class TAACLogger:
         
         # Environment-specific progress
         if self.env_name == "boxjump":
-            if 'max_height' in stats:
-                print(f"  # Max Height: {stats['max_height']:.2f}")
+            if 'avg_max_height' in stats:
+                print(f"  # Max Height: {stats['avg_max_height']:.2f}")
         elif self.env_name == "mpe_simple_spread":
             if 'avg_collision_count' in stats:
                 print(f"  ! Avg Collisions: {stats['avg_collision_count']:.1f}")
@@ -416,7 +403,6 @@ class TAACLogger:
             'episode_lengths': self.episode_lengths,
             'normalized_entropies': self.normalized_entropies,
             'similarity_losses': self.similarity_losses,
-            'elo_ratings': self.elo_ratings,
             'env_specific_metrics': self.env_specific_metrics,
             'total_episodes': self.episode_count,
             'final_model_path': final_model_path,
