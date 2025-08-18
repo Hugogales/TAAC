@@ -113,6 +113,7 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
+        #attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
 
         #concatenate the attention output with the actor input
         attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
@@ -137,6 +138,7 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
+        #attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
 
         #concatenate the attention output with the actor input
         attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]

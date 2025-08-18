@@ -84,7 +84,7 @@ dynamic_agents:
 
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
-load_model: "files/Models/boxjump/TAAC_01/invalid_model.pth"
+load_model: "files/Models/boxjump/TAAC_05/TAAC_05_ep45700.pth"  # Path to model file to load (or null to train from scratch)
 job_name: *job_name
 
 environment:
@@ -93,8 +93,8 @@ environment:
     # === CORE ENVIRONMENT SETTINGS ===
     # NOTE: When dynamic_agents.enabled=true, num_boxes will be randomly selected
     # from dynamic_agents.agent_counts instead of using the value below
-    num_boxes: 3                    # Number of box agents (2-16). More agents = harder coordination
-    world_width: 10                 # Environment width in Box2D units
+    num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
+    world_width: 3                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
     max_timestep: 512               # Episode length in steps (minimal to avoid indexing bug)
     
@@ -176,8 +176,8 @@ environment:
       # === EARLY TERMINATION PARAMETERS ===
     # NOTE: When dynamic_agents.enabled=true and adaptive_termination.enabled=true,
     # termination_max_height will be calculated as: num_agents + 0.5
-    termination_max_height: 3.5     # Terminate episode when this height is reached
-    termination_reward: 200.0       # Reward given to all agents when termination height is reached    
+    termination_max_height: 4.5     # Terminate episode when this height is reached
+    termination_reward: 70.0       # Reward given to all agents when termination height is reached    
     
     # === FALL TERMINATION PARAMETERS ===
     termination_on_fall: true      # If true, episode terminates when any agent falls off
@@ -209,8 +209,8 @@ environment:
 # Model Architecture - LIGHTWEIGHT FOR BOXJUMP
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 128               # Attention embedding dimension (reduced from 256)
-  hidden_size: 256                  # Hidden layer size for networks (reduced from 526)
+  embedding_dim: 256                # Attention embedding dimension (reduced from 256)
+  hidden_size: 512                  # Hidden layer size for networks (reduced from 526)
   model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
