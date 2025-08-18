@@ -188,9 +188,11 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
                     step_reward = sum(rewards)
                     episode_reward += step_reward
                     step_count += 1
+                    avg_entropy = np.mean(list(_entropies.values()))
+
                     
                     # Print step info with environment-specific details
-                    step_info = f"  Step {step_count}: Reward = {step_reward:.2f}"
+                    step_info = f"  Step {step_count}: Reward = {step_reward:.4f}, Entropy = {avg_entropy:.4f}"
                     
                     # Add environment-specific information
                     if env_name == 'boxjump' and env_metrics and 'max_height' in env_metrics:

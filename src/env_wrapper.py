@@ -576,34 +576,7 @@ class TAACEnvironmentWrapper:
             # Access the actual BoxJump environment through the wrapper
             actual_boxjump_env = self.original_env.env if hasattr(self.original_env, 'env') else self.original_env
             
-            # Check for early termination BEFORE stepping the environment
-            # This prevents unnecessary computation after success
-            if (self.termination_max_height is not None and 
-                hasattr(actual_boxjump_env, 'highest_y') and 
-                actual_boxjump_env.highest_y >= self.termination_max_height):
-                
-                # Episode should have already terminated - return terminal state
-                # Get current observations without stepping
-                current_obs = actual_boxjump_env.get_all_obs()
-                
-                # Create terminal rewards and dones
-                rewards = {}
-                dones = {}
-                for agent in current_obs.keys():
-                    dones[agent] = True
-                    rewards[agent] = self.termination_reward
-                
-                # Set termination flag to prevent further steps
-                self._episode_terminated = True
-                
-                # Create terminal info
-                info = {
-                    'termination_reason': 'max_height_reached',
-                    'final_height': actual_boxjump_env.highest_y,
-                    'early_termination': True
-                }
-                
-                return current_obs, rewards, dones, info
+            # Note: Do not override rewards here; let the environment drive termination and bonuses
             
             # Normal environment step
             result = self.original_env.step(env_actions)
@@ -627,11 +600,6 @@ class TAACEnvironmentWrapper:
                 # Set all agents as done (terminate episode)
                 for agent in observations.keys():
                     dones[agent] = True
-                
-                # Give termination reward to all agents (override regular rewards)
-                if self.termination_reward != 0.0:
-                    for agent in observations.keys():
-                        rewards[agent] = self.termination_reward
                 
                 # Set termination flag to prevent further steps
                 self._episode_terminated = True
