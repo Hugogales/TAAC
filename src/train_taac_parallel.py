@@ -235,8 +235,18 @@ class PersistentWorker:
             
         print(f"Worker {self.worker_id}: Starting episode {episode_num}")
             
+        # Determine target number of steps for this outer episode
+        target_steps = self.env_kwargs.get('max_timestep', self.max_steps)
+        
+        def _resets_on_termination() -> bool:
+            try:
+                actual_env = self.env_wrapper.original_env.env if hasattr(self.env_wrapper.original_env, 'env') else self.env_wrapper.original_env
+                return bool(getattr(actual_env, 'reset_episode_on_termination', False))
+            except Exception:
+                return False
+
         # Main episode loop
-        while not done and step_count < self.max_steps:
+        while step_count < target_steps:
             # IMPORTANT: This also stores states and actions in the memory
             train_actions, train_log_probs, train_entropies = self.model.get_actions(states)
                 
@@ -259,8 +269,12 @@ class PersistentWorker:
             states = next_states
             episode_reward += sum(rewards)
             step_count += 1
-                
-            if done:
+            
+            # If environment terminated but is configured to auto-restart, reset and continue
+            if done and _resets_on_termination() and step_count < target_steps:
+                states, _ = self.env_wrapper.reset()
+                done = False
+            elif done:
                 break
             
         # Calculate normalized entropy for this episode
@@ -370,7 +384,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
         print(f"🎲 Dynamic Agent Training ENABLED:")
         print(f"   Agent counts: {agent_counts}")
         if dynamic_config.get('adaptive_termination', {}).get('enabled', False):
-            height_formula = dynamic_config.get('adaptive_termination', {}).get('height_formula', 'num_agents + 0.5')
+            height_formula = dynamic_config.get('adaptive_termination', {}).get('height_formula', 'num_agents')
             print(f"   Adaptive termination: {height_formula}")
     
     # Create sample environment to get info (with dynamic config if enabled)
@@ -466,13 +480,13 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
                 # Calculate adaptive termination if enabled
                 adaptive_config = dynamic_config.get('adaptive_termination', {})
                 if adaptive_config.get('enabled', False):
-                    height_formula = adaptive_config.get('height_formula', 'num_agents + 0.5')
+                    height_formula = adaptive_config.get('height_formula', 'num_agents')
                     if 'num_agents' in height_formula:
                         formula_parts = height_formula.replace('num_agents', str(current_agent_count))
                         try:
                             current_termination_height = eval(formula_parts)
                         except:
-                            current_termination_height = current_agent_count + 0.5
+                            current_termination_height = current_agent_count 
                     else:
                         current_termination_height = float(height_formula)
                     print(f"   Termination height: {current_termination_height}")

@@ -5,6 +5,11 @@ alwaysApply: true
 ---
 
 I am currently creating a set of code to be able to train, test and view algorithms train in various enviroments
-
 The code should allow me to easily change specific parameters 
+
+The code should be compatible for parrallel enviroment computation on high-compute system with many gpus and many cpus and should take advangtage of the resources.
+
+I will be testing different algorithms, different enviroment, different hyperparmeters and it should all be easily configureable with minor changes
+
+
 

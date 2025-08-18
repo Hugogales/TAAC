@@ -350,7 +350,7 @@ class TAACEnvironmentWrapper:
         # Calculate adaptive termination height if enabled
         adaptive_config = self.dynamic_config.get('adaptive_termination', {})
         if adaptive_config.get('enabled', False):
-            height_formula = adaptive_config.get('height_formula', 'num_agents + 0.5')
+            height_formula = adaptive_config.get('height_formula', 'num_agents')
             # Simple formula evaluation (only supports num_agents + number format)
             if 'num_agents' in height_formula:
                 # Extract the addition/subtraction part
@@ -359,7 +359,7 @@ class TAACEnvironmentWrapper:
                     self.current_termination_height = eval(formula_parts)
                 except:
                     # Fallback to simple addition
-                    self.current_termination_height = self.current_agent_count + 0.5
+                    self.current_termination_height = self.current_agent_count 
             else:
                 self.current_termination_height = float(height_formula)
         
@@ -578,9 +578,11 @@ class TAACEnvironmentWrapper:
             
             # Check for early termination BEFORE stepping the environment
             # This prevents unnecessary computation after success
+            # Skip this optimization if environment is configured to reset on termination
             if (self.termination_max_height is not None and 
                 hasattr(actual_boxjump_env, 'highest_y') and 
-                actual_boxjump_env.highest_y >= self.termination_max_height):
+                actual_boxjump_env.highest_y >= self.termination_max_height and
+                not getattr(actual_boxjump_env, 'reset_episode_on_termination', False)):
                 
                 # Episode should have already terminated - return terminal state
                 # Get current observations without stepping
@@ -620,9 +622,11 @@ class TAACEnvironmentWrapper:
                 raise ValueError(f"BoxJump returned unexpected number of values: {len(result)}")
             
             # Check for early termination due to max height reached AFTER this step
+            # Skip if environment is configured to reset on termination
             if (self.termination_max_height is not None and 
                 hasattr(actual_boxjump_env, 'highest_y') and 
-                actual_boxjump_env.highest_y >= self.termination_max_height):
+                actual_boxjump_env.highest_y >= self.termination_max_height and
+                not getattr(actual_boxjump_env, 'reset_episode_on_termination', False)):
                 
                 # Set all agents as done (terminate episode)
                 for agent in observations.keys():

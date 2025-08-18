@@ -5,7 +5,7 @@
 # 2. All paths will be automatically constructed from job_name!
 
 # Main experiment variables - CHANGE THESE TO CREATE NEW VERSIONS
-job_name: &job_name "TAAC_07"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
+job_name: &job_name "TAAC_08"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 
@@ -15,13 +15,13 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 # Termination height is automatically adjusted based on the number of agents
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [2, 3, 4]  # List of possible agent counts to randomly choose from
+  agent_counts: [4, 5, 6, 7]  # List of possible agent counts to randomly choose from
   
   # Adaptive termination configuration
   adaptive_termination:
     enabled: true                    # Enable adaptive termination height
-    height_formula: "num_agents + 0.5"  # Formula for calculating termination height
-    base_reward: 100.0              # Base termination reward
+    height_formula: "num_agents - 0.2"  # Formula for calculating termination height
+    base_reward: 200.0              # Base termination reward
     
   # Override standard environment settings when dynamic agents are enabled
   # These will be ignored in favor of dynamic configuration
@@ -84,7 +84,7 @@ dynamic_agents:
 
 # Model loading (optional)
 # Set this to continue training from an existing model or for view.py
-load_model: "files/Models/boxjump/TAAC_02/invalid.pth"  # Path to pre-trained model (optional)
+load_model: "files/Models/boxjump/TAAC_01/invalid_model.pth"
 job_name: *job_name
 
 environment:
@@ -96,7 +96,7 @@ environment:
     num_boxes: 3                    # Number of box agents (2-16). More agents = harder coordination
     world_width: 10                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 526               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep: 512               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
@@ -112,7 +112,7 @@ environment:
     
     # === REWARD SYSTEM ===
     # CRITICAL: Understanding the reward system is key to training success
-    reward_mode: "dense_height_stable_exp"          # Reward scheme - Choose based on desired behavior:
+    reward_mode: "dense_height_exp"          # Reward scheme - Choose based on desired behavior:
     
     # REWARD MODE DETAILS:
     # "highest" (COOPERATIVE - recommended for multi-agent coordination):
@@ -177,7 +177,7 @@ environment:
     # NOTE: When dynamic_agents.enabled=true and adaptive_termination.enabled=true,
     # termination_max_height will be calculated as: num_agents + 0.5
     termination_max_height: 3.5     # Terminate episode when this height is reached
-    termination_reward: 100.0       # Reward given to all agents when termination height is reached    
+    termination_reward: 200.0       # Reward given to all agents when termination height is reached    
     
     # === FALL TERMINATION PARAMETERS ===
     termination_on_fall: true      # If true, episode terminates when any agent falls off
@@ -185,6 +185,14 @@ environment:
                                     # (Only applies when termination_on_fall=true)
                                     # - Normal penalty_fall applies when termination_on_fall=false
                                     # - This is a one-time penalty for the specific agent that caused termination
+    
+    # === EPISODE RESET PARAMETERS ===
+    reset_episode_on_termination: true  # If true, restart episode when it terminates until max_timestep is reached
+                                        # - When true: Episode continues to restart after termination until max_timestep
+                                        # - When false: Episode ends immediately upon termination (standard behavior)
+                                        # - Useful for training scenarios where you want continuous learning
+                                        # - Termination conditions still apply (height reached, agent fallen, etc.)
+                                        # - Each restart maintains the same episode context but resets agent positions
     
     # === OBSERVATION SETTINGS ===
     include_time: false              # Include time remaining (0-1) in observations
@@ -211,17 +219,17 @@ training:
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
   gamma: 0.985                 # Discount factor (higher for delayed tower rewards)
   learning_rate: 5e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.15                 # PPO clipping parameter
-  K_epochs: 10                   # PPO update epochs per batch
-  c_entropy: 0.0001                   # Entropy coefficient for exploration
-  max_grad_norm: 10               # Gradient clipping norm
+  epsilon_clip: 0.12                 # PPO clipping parameter
+  K_epochs: 12                   # PPO update epochs per batch
+  c_entropy: 0.00                   # Entropy coefficient for exploration
+  max_grad_norm: 200               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.98                         # GAE lambda parameter
-  batch_size: 128                    # Training batch size 
+  batch_size: 1024                    # Training batch size
   min_learning_rate: 1e-5       # Minimum learning rate for scheduler
-  similarity_loss_coef: 0.0001         # Cooperation loss (higher = more coordinated behavior)
+  similarity_loss_coef: 0.00000         # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.5          # Max cap for similarity loss to prevent instability
-  num_parallel: 4                   # Number of parallel environments (1 = single env, 4+ = parallel training)
+  num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
 
 # Logging & Evaluation
 logging:

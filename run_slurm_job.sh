@@ -12,9 +12,9 @@
 #SBATCH --account=undergrad_research
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=32
-#SBATCH --job-name=H-BOX-07
-#SBATCH --output=jobs/boxjump/TAAC_07/slurm.out
-#SBATCH --error=jobs/boxjump/TAAC_07/slurm.err
+#SBATCH --job-name=H-BOX-08
+#SBATCH --output=jobs/boxjump/TAAC_08/slurm.out
+#SBATCH --error=jobs/boxjump/TAAC_08/slurm.err
 
 echo "Running on node: $(hostname)"
 echo "Time: $(date)"
