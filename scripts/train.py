@@ -21,6 +21,7 @@ import argparse
 import traceback
 from pathlib import Path
 from typing import Dict, Any, Optional
+import warnings
 
 # Add the project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -30,6 +31,14 @@ from src.train_taac import train_taac
 from src.train_taac_parallel import train_taac_parallel
 from src.env_wrapper import TAACEnvironmentWrapper
 from src.AI.TAAC import TAAC
+
+# Silence noisy third-party warnings that do not affect training
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+    module="pygame.pkgdata"
+)
 
 
 def load_config(config_path: str) -> dict:

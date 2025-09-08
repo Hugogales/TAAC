@@ -301,6 +301,10 @@ class TAACEnvironmentWrapper:
         """
         self.env_name = env_name
         self.dynamic_config = dynamic_config or {}
+        # Intercept wrapper-only parameter: do NOT pass to underlying env
+        self.auto_reset_on_termination = bool(env_kwargs.pop('reset_episode_on_termination', False))
+        # Keep a seed counter for wrapper-managed resets
+        self._autoreset_seed_counter = 0
         self.original_env_kwargs = env_kwargs.copy()
         
         # Handle dynamic agent configuration
@@ -308,6 +312,8 @@ class TAACEnvironmentWrapper:
         self.current_termination_height = None
         if self._is_dynamic_agent_enabled():
             self._setup_dynamic_agents()
+            # Prepare kwargs even in dynamic mode so overrides (agent count/termination) are applied
+            env_kwargs = self._prepare_env_kwargs(env_kwargs)
         else:
             # Use static configuration
             env_kwargs = self._prepare_env_kwargs(env_kwargs)
@@ -318,7 +324,7 @@ class TAACEnvironmentWrapper:
         
         # Store BoxJump-specific termination parameters
         self.termination_max_height = env_kwargs.get('termination_max_height', None)
-        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self.termination_reward_coef = env_kwargs.get('termination_reward_coef', 0.0)
         self._episode_terminated = False  # Track if episode has been terminated early
         
         # Apply standardization wrappers if requested
@@ -365,6 +371,14 @@ class TAACEnvironmentWrapper:
         
     def _prepare_env_kwargs(self, env_kwargs: Dict) -> Dict:
         """Prepare environment kwargs with dynamic configuration"""
+        # Normalize friendly aliases for BoxJump physics controls
+        if self.env_name == 'boxjump':
+            if 'physics_steps' in env_kwargs and 'physics_steps_per_action' not in env_kwargs:
+                env_kwargs['physics_steps_per_action'] = env_kwargs.pop('physics_steps')
+            # Accept possible misspelling 'physics_timestep_multipler' and map to correct name
+            if 'physics_timestep_multipler' in env_kwargs and 'physics_timestep_multiplier' not in env_kwargs:
+                env_kwargs['physics_timestep_multiplier'] = env_kwargs.pop('physics_timestep_multipler')
+        
         if not self._is_dynamic_agent_enabled():
             return env_kwargs
             
@@ -377,11 +391,12 @@ class TAACEnvironmentWrapper:
                 
         if (self.dynamic_config.get('override_termination', True) and 
             self.current_termination_height is not None):
+            # Always apply dynamic termination height
             env_kwargs['termination_max_height'] = self.current_termination_height
-            # Also set termination reward if specified
+            # Only apply dynamic base reward if YAML/env kwargs didn't specify one
             adaptive_config = self.dynamic_config.get('adaptive_termination', {})
-            if 'base_reward' in adaptive_config:
-                env_kwargs['termination_reward'] = adaptive_config['base_reward']
+            if ('termination_reward_coef' not in env_kwargs) and ('base_reward' in adaptive_config):
+                env_kwargs['termination_reward_coef'] = adaptive_config['base_reward']
                 
         return env_kwargs
     
@@ -390,7 +405,7 @@ class TAACEnvironmentWrapper:
         return {
             'agent_count': self.current_agent_count,
             'termination_height': self.current_termination_height,
-            'termination_reward': self.termination_reward,
+            'termination_reward_coef': self.termination_reward_coef,
             'dynamic_enabled': self._is_dynamic_agent_enabled()
         }
     
@@ -404,6 +419,9 @@ class TAACEnvironmentWrapper:
         
         # Recreate environment with new configuration
         env_kwargs = self._prepare_env_kwargs(self.original_env_kwargs.copy())
+        # Ensure wrapper-only flag never reaches the env on recreation
+        if 'reset_episode_on_termination' in env_kwargs:
+            env_kwargs.pop('reset_episode_on_termination', None)
         
         # Close current environment
         self.close()
@@ -414,7 +432,7 @@ class TAACEnvironmentWrapper:
         
         # Update termination parameters
         self.termination_max_height = env_kwargs.get('termination_max_height', None)
-        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self.termination_reward_coef = env_kwargs.get('termination_reward_coef', 0.0)
         self._episode_terminated = False
         
         # Re-extract environment information
@@ -591,26 +609,70 @@ class TAACEnvironmentWrapper:
                         for agent in observations.keys()}
             else:
                 raise ValueError(f"BoxJump returned unexpected number of values: {len(result)}")
-            
-            # Check for early termination due to max height reached AFTER this step
-            # Skip if environment is configured to reset on termination
-            if (self.termination_max_height is not None and 
-                hasattr(actual_boxjump_env, 'highest_y') and 
-                actual_boxjump_env.highest_y >= self.termination_max_height and
-                not getattr(actual_boxjump_env, 'reset_episode_on_termination', False)):
-                
-                # Set all agents as done (terminate episode)
-                for agent in observations.keys():
-                    dones[agent] = True
-                
-                # Set termination flag to prevent further steps
-                self._episode_terminated = True
-                
-                # Add termination info
-                info['termination_reason'] = 'max_height_reached'
-                info['final_height'] = actual_boxjump_env.highest_y
-                info['early_termination'] = True
-                
+
+            # Wrapper-managed auto reset only: do not alter env's termination logic
+            episode_done = False
+            if isinstance(dones, dict) and dones:
+                episode_done = all(dones.values())
+            if not episode_done:
+                try:
+                    current_agents = getattr(self.original_env, 'agents', [])
+                    if current_agents is not None and len(current_agents) == 0:
+                        episode_done = True
+                except Exception:
+                    pass
+
+            if self.auto_reset_on_termination and episode_done:
+                # Determine if termination was due to reaching the max height target
+                reached_top = False
+                try:
+                    pre_reset_heights = []
+                    if isinstance(observations, dict):
+                        for _agent, obs in observations.items():
+                            candidate = None
+                            if isinstance(obs, dict):
+                                for v in obs.values():
+                                    if isinstance(v, np.ndarray) and v.size > 1:
+                                        candidate = v
+                                        break
+                            elif isinstance(obs, np.ndarray):
+                                candidate = obs
+                            if candidate is not None:
+                                flat = candidate.flatten()
+                                if flat.size > 1:
+                                    pre_reset_heights.append(float(flat[1]))
+                    if pre_reset_heights:
+                        pre_max = max(pre_reset_heights)
+                        if self.termination_max_height is not None:
+                            reached_top = (pre_max >= float(self.termination_max_height) - 1e-6)
+                except Exception:
+                    reached_top = False
+
+                self._autoreset_seed_counter += 1
+                reset_obs, reset_info = self.original_env.reset(seed=self._autoreset_seed_counter)
+                # Replace observations with reset observations and clear dones
+                observations = reset_obs
+                # Create fresh dones dict with all False
+                if isinstance(observations, dict):
+                    dones = {agent: False for agent in observations.keys()}
+                else:
+                    dones = {agent: False for agent in self.agents}
+                if isinstance(info, dict):
+                    info['auto_reset'] = True
+                    info['reached_termination_height'] = bool(reached_top)
+                    try:
+                        if pre_reset_heights:
+                            info['pre_reset_max_height'] = float(max(pre_reset_heights))
+                    except Exception:
+                        pass
+                else:
+                    info = {'auto_reset': True, 'reached_termination_height': bool(reached_top)}
+                    try:
+                        if pre_reset_heights:
+                            info['pre_reset_max_height'] = float(max(pre_reset_heights))
+                    except Exception:
+                        pass
+
             return observations, rewards, dones, info
                 
         except Exception as e:
@@ -626,15 +688,39 @@ class TAACEnvironmentWrapper:
             
             if len(result) == 4:
                 observations, rewards, dones, info = result
-                return observations, rewards, dones, info
             elif len(result) == 5:
                 observations, rewards, terminations, truncations, info = result
                 # Combine terminations and truncations into dones
                 dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
                         for agent in observations.keys()}
-                return observations, rewards, dones, info
             else:
                 raise ValueError(f"MPE returned unexpected number of values: {len(result)}")
+            
+            # Wrapper-managed auto reset for MPE
+            if self.auto_reset_on_termination:
+                episode_done = False
+                if isinstance(dones, dict) and dones:
+                    episode_done = all(dones.values())
+                if not episode_done:
+                    try:
+                        if hasattr(self.env, 'agents') and len(self.env.agents) == 0:
+                            episode_done = True
+                    except Exception:
+                        pass
+                if episode_done:
+                    self._autoreset_seed_counter += 1
+                    reset_obs, _ = self.env.reset(seed=self._autoreset_seed_counter)
+                    observations = reset_obs
+                    if isinstance(observations, dict):
+                        dones = {agent: False for agent in observations.keys()}
+                    else:
+                        dones = {agent: False for agent in self.agents}
+                    if isinstance(info, dict):
+                        info['auto_reset'] = True
+                    else:
+                        info = {'auto_reset': True}
+            
+            return observations, rewards, dones, info
                 
         except Exception as e:
             print(f"Error in MPE step: {e}")
@@ -647,14 +733,38 @@ class TAACEnvironmentWrapper:
             
             if len(result) == 4:
                 observations, rewards, dones, info = result
-                return observations, rewards, dones, info
             elif len(result) == 5:
                 observations, rewards, terminations, truncations, info = result
                 dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
                         for agent in observations.keys()}
-                return observations, rewards, dones, info
             else:
                 raise ValueError(f"CookingZoo returned unexpected number of values: {len(result)}")
+            
+            # Wrapper-managed auto reset
+            if self.auto_reset_on_termination:
+                episode_done = False
+                if isinstance(dones, dict) and dones:
+                    episode_done = all(dones.values())
+                if not episode_done:
+                    try:
+                        if hasattr(self.env, 'agents') and len(self.env.agents) == 0:
+                            episode_done = True
+                    except Exception:
+                        pass
+                if episode_done:
+                    self._autoreset_seed_counter += 1
+                    reset_obs, _ = self.env.reset(seed=self._autoreset_seed_counter)
+                    observations = reset_obs
+                    if isinstance(observations, dict):
+                        dones = {agent: False for agent in observations.keys()}
+                    else:
+                        dones = {agent: False for agent in self.agents}
+                    if isinstance(info, dict):
+                        info['auto_reset'] = True
+                    else:
+                        info = {'auto_reset': True}
+            
+            return observations, rewards, dones, info
                 
         except Exception as e:
             print(f"Error in CookingZoo step: {e}")
@@ -667,14 +777,38 @@ class TAACEnvironmentWrapper:
             
             if len(result) == 4:
                 observations, rewards, dones, info = result
-                return observations, rewards, dones, info
             elif len(result) == 5:
                 observations, rewards, terminations, truncations, info = result
                 dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
                         for agent in observations.keys()}
-                return observations, rewards, dones, info
             else:
                 raise ValueError(f"MATS Gym returned unexpected number of values: {len(result)}")
+            
+            # Wrapper-managed auto reset
+            if self.auto_reset_on_termination:
+                episode_done = False
+                if isinstance(dones, dict) and dones:
+                    episode_done = all(dones.values())
+                if not episode_done:
+                    try:
+                        if hasattr(self.env, 'agents') and len(self.env.agents) == 0:
+                            episode_done = True
+                    except Exception:
+                        pass
+                if episode_done:
+                    self._autoreset_seed_counter += 1
+                    reset_obs, _ = self.env.reset(seed=self._autoreset_seed_counter)
+                    observations = reset_obs
+                    if isinstance(observations, dict):
+                        dones = {agent: False for agent in observations.keys()}
+                    else:
+                        dones = {agent: False for agent in self.agents}
+                    if isinstance(info, dict):
+                        info['auto_reset'] = True
+                    else:
+                        info = {'auto_reset': True}
+            
+            return observations, rewards, dones, info
                 
         except Exception as e:
             print(f"Error in MATS Gym step: {e}")
@@ -687,20 +821,43 @@ class TAACEnvironmentWrapper:
             
             if len(result) == 4:
                 observations, rewards, dones, info = result
-                return observations, rewards, dones, info
             elif len(result) == 5:
                 observations, rewards, terminations, truncations, info = result
                 dones = {agent: terminations.get(agent, False) or truncations.get(agent, False) 
                         for agent in observations.keys()}
-                return observations, rewards, dones, info
             else:
                 # Try to handle other cases gracefully
                 print(f"Warning: Environment returned {len(result)} values, expected 4 or 5")
                 if len(result) >= 4:
                     observations, rewards, dones, info = result[:4]
-                    return observations, rewards, dones, info
                 else:
                     raise ValueError(f"Environment returned too few values: {len(result)}")
+            
+            # Wrapper-managed auto reset for default path
+            if self.auto_reset_on_termination:
+                episode_done = False
+                if isinstance(dones, dict) and dones:
+                    episode_done = all(dones.values())
+                if not episode_done:
+                    try:
+                        if hasattr(self.env, 'agents') and len(self.env.agents) == 0:
+                            episode_done = True
+                    except Exception:
+                        pass
+                if episode_done:
+                    self._autoreset_seed_counter += 1
+                    reset_obs, _ = self.env.reset(seed=self._autoreset_seed_counter)
+                    observations = reset_obs
+                    if isinstance(observations, dict):
+                        dones = {agent: False for agent in observations.keys()}
+                    else:
+                        dones = {agent: False for agent in self.agents}
+                    if isinstance(info, dict):
+                        info['auto_reset'] = True
+                    else:
+                        info = {'auto_reset': True}
+            
+            return observations, rewards, dones, info
                     
         except Exception as e:
             print(f"Error in default step method: {e}")
@@ -788,7 +945,7 @@ ENV_CONFIGS = {
             'render_mode': None,  # None for training, "human" for visualization
             'max_timestep': 500,  # BoxJump uses max_timestep, not max_cycles
             'termination_max_height': 10.0,  # Terminate episode when this height is reached
-            'termination_reward': 100.0  # Final reward given to all agents when max height is reached
+            'termination_reward_coef': 100.0  # Final reward given to all agents when max height is reached
         },
         'training_config': {
             'gamma': 0.995,  # Higher gamma for delayed tower-building rewards

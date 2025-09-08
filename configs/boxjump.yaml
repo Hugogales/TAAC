@@ -5,7 +5,7 @@
 # 2. All paths will be automatically constructed from job_name!
 
 # Main experiment variables - CHANGE THESE TO CREATE NEW VERSIONS
-job_name: &job_name "TAAC_08"           # Main job identifier - CHANGE THIS FOR NEW VERSIONS
+job_name: &job_name "TAAC_34"
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 
@@ -15,12 +15,12 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 # Termination height is automatically adjusted based on the number of agents
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [4, 5, 6, 7]  # List of possible agent counts to randomly choose from
+  agent_counts: [6, 7, 8, 9, 10]  # List of possible agent counts to randomly choose from
   
   # Adaptive termination configuration
   adaptive_termination:
     enabled: true                    # Enable adaptive termination height
-    height_formula: "num_agents - 0.2"  # Formula for calculating termination height
+    height_formula: "num_agents + 0.1"  # Formula for calculating termination height
     base_reward: 200.0              # Base termination reward
     
   # Override standard environment settings when dynamic agents are enabled
@@ -29,155 +29,39 @@ dynamic_agents:
   override_termination: true        # When true, ignores env_kwargs.termination_max_height
 
 # === REWARD TUNING GUIDE ===
-#
-# ADJUSTING PENALTY_FALL:
-#   - Too low (< 5): Agents don't care about falling, chaotic behavior
-#   - Just right (10-30): Agents are careful but still take reasonable risks
-#   - Too high (> 50): Agents become overly conservative, slow learning
-#   - Current setting (20): Good balance for 6 agents, 2048 timesteps
-#
-# ADJUSTING REWARD_MODE:
-#   - Start with "highest" for cooperative learning
-#   - Switch to "highest_stable" if agents game the system with jumping
-#   - Try "highest_exp" for exponential scaling (harder for critic to predict)
-#   - Use "highest_stable_exp" for stable exponential cooperation
-#   - Try "height_sq" if you want more individual skill development
-#   - Use "stable_sum" for very careful, stable climbing behavior
-#   - Use "dense_height" for continuous communal rewards
-#
-# EPISODE LENGTH IMPACT:
-#   - Longer episodes (max_timestep): Lower per-step fall penalty
-#   - Shorter episodes: Higher per-step penalty, more urgent behavior
-#   - Current 2048 steps: Allows time for complex tower building
-
-# BoxJump Environment Configuration
-# Cooperative tower-building with Box2D physics simulation
-# Goal: Build the tallest tower possible by stacking boxes cooperatively
-
-# === STATE & ACTION SPACES ===
-# 
-# OBSERVATION SPACE (per agent):
-# 12-dimensional vector per agent (constant size regardless of number of agents):
-#   0: Horizontal position (0 to 1, normalized)
-#   1: Height above floor (0 = on floor, n = n boxes high)
-#   2: Velocity x-component (vx)
-#   3: Velocity y-component (vy) 
-#   4: Angle in quarter turns (-0.5 to 0.5, 0 when rotation disabled)
-#   5: Angular velocity (0 when rotation disabled)
-#   6: Raycast distance left (distance to nearest obstacle/floor)
-#   7: Raycast distance right (distance to nearest obstacle/floor)
-#   8: Raycast distance up (distance to nearest obstacle/floor)
-#   9: Raycast distance down (distance to nearest obstacle/floor)
-#   10: Can jump flag (0/1, whether agent can currently jump)
-#   11: Number of boxes in the environment (useful for dynamic agents)
-#
-# GLOBAL STATE:
-# Concatenation of all per-agent observations, but with highest y-coordinate
-# and time remaining included only once (as these are global properties).
-#
-# ACTION SPACE (per agent):
-# 4 discrete actions:
-#   0 = do nothing
-#   1 = apply force to the left
-#   2 = apply force to the right  
-#   3 = jump (only works if agent can currently jump)
-
-# Model loading (optional)
-# Set this to continue training from an existing model or for view.py
-load_model: "files/Models/boxjump/TAAC_05/TAAC_05_ep45700.pth"  # Path to model file to load (or null to train from scratch)
+load_model: "files/Models/boxjump/TAAC_26/TAAC_26_ep21000.pth"  # Path to model file to load (or null to train from scratch)
+#load_model: null
 job_name: *job_name
 
 environment:
   name: *env_name
   env_kwargs:
     # === CORE ENVIRONMENT SETTINGS ===
-    # NOTE: When dynamic_agents.enabled=true, num_boxes will be randomly selected
-    # from dynamic_agents.agent_counts instead of using the value below
     num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
     world_width: 3                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 512               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep: 526               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
     box_height: 1.0                 # Height of each box agent
     fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
+    reward_only_biggest_tower: true # Only reward agents in tallest tower chain
     gravity: 10                     # Gravity force (higher = faster falling)
     friction: 0.8                   # Friction between boxes (0-1, higher = less slippery)
     angular_damping: 1              # Prevents excessive spinning (higher = less spinning)
+    physics_steps_per_action: 8     # How many physics steps per environment step (action duration)
+    physics_timestep_multiplier: 2.0 # Multiplier for physics timestep (time passes faster)
     
     # === STARTING POSITIONS ===
     spacing: 1.5                    # Horizontal spacing between boxes at start
     random_spacing: 0.5             # Randomness in starting positions (0 = fixed positions)
     
-    # === REWARD SYSTEM ===
-    # CRITICAL: Understanding the reward system is key to training success
-    reward_mode: "dense_height_exp"          # Reward scheme - Choose based on desired behavior:
+    reward_mode: "dense_height_cube"          # Reward scheme - Choose based on desired behavior:
     
-    # REWARD MODE DETAILS:
-    # "highest" (COOPERATIVE - recommended for multi-agent coordination):
-    #   - ALL agents get same reward when ANY agent reaches new max height
-    #   - Formula: reward = (new_best - previous_best) / num_boxes
-    #   - Promotes pure cooperation - everyone wins when anyone succeeds
-    #   - Best for learning tower-building coordination
-    #
-    # "highest_stable" (STABLE COOPERATION):
-    #   - Same as "highest" but only stable (non-jumping) boxes count
-    #   - Prevents rewarding temporary mid-air achievements
-    #   - More conservative but potentially more stable learning
-    #
-    # "highest_exp" (EXPONENTIAL COOPERATIVE - NEW):
-    #   - ALL agents get same reward: 2^(new_height) - 2^(old_height) when new max height reached
-    #   - Exponential scaling makes higher towers much more valuable
-    #   - Harder for critic to predict exact values, improves training efficiency
-    #   - Formula: reward = (2^new_best - 2^prev_best) / num_boxes (capped at 1000)
-    #   - Example: Height 1→2 gives 2 reward, Height 3→4 gives 8 reward
-    #
-    # "highest_stable_exp" (STABLE EXPONENTIAL COOPERATIVE - NEW):
-    #   - Same as highest_exp but only stable boxes count for height calculation
-    #   - Combines exponential scaling with stability requirements
-    #   - Most challenging cooperative mode with highest reward variance
-    #
-    # "height_sq" (INDIVIDUAL PERFORMANCE):
-    #   - Each agent gets individual reward = (height²/num_boxes)/max_timestep
-    #   - Continuous rewards every step based on current position
-    #   - Less cooperative, more competitive behavior
-    #   - Can lead to agents abandoning others to climb higher
-    #
-    # "stable_sum" (STABLE INDIVIDUAL):
-    #   - Like height_sq but 50x multiplier, only when agent is stable
-    #   - No reward while falling/jumping
-    #   - Encourages careful, stable climbing
-    #
-    # "dense_height" (CONTINUOUS COMMUNAL REWARD - NEW):
-    #   - ALL agents get the same reward based on current max height EVERY step
-    #   - Formula: reward = 50*(max_height/num_boxes)/max_timestep
-    #   - Provides constant feedback even when height doesn't change
-    #   - More stable training signal, less sparse rewards
-    #
-    # "dense_height_stable" (STABLE CONTINUOUS COMMUNAL REWARD - NEW):
-    #   - Like dense_height but only considers STABLE boxes for max height
-    #   - More conservative, encourages maintaining stable structures
-    #   - Discourages temporary height gains from jumping
-    
-    # PENALTY SYSTEM (Fall Penalty):
     penalty_fall: 20                # Fall penalty - HOW IT WORKS:
-                                    # - INDIVIDUAL: Only the falling agent gets penalized
-                                    # - CONTINUOUS: Applied every step while below ground level
-                                    # - Formula: -penalty_fall/max_timestep per step
-                                    # - Total penalty = penalty_fall if fallen entire episode
-                                    # - OVERRIDE: Falling agents get NO positive rewards
-                                    # - Threshold: height_above_floor < -0.001 (slightly below ground)
-                                    # 
-                                    # Example with penalty_fall=20, max_timestep=2048:
-                                    # - Falling agent gets -20/2048 = -0.00977 per step
-                                    # - If fallen for 100 steps = -0.977 total penalty
-                                    # - If fallen entire episode = -20.0 total penalty
-      # === EARLY TERMINATION PARAMETERS ===
-    # NOTE: When dynamic_agents.enabled=true and adaptive_termination.enabled=true,
-    # termination_max_height will be calculated as: num_agents + 0.5
     termination_max_height: 4.5     # Terminate episode when this height is reached
-    termination_reward: 70.0       # Reward given to all agents when termination height is reached    
+    termination_reward_coef: 500.0       # Reward given to all agents when termination height is reached    
     
     # === FALL TERMINATION PARAMETERS ===
     termination_on_fall: true      # If true, episode terminates when any agent falls off
@@ -188,11 +72,6 @@ environment:
     
     # === EPISODE RESET PARAMETERS ===
     reset_episode_on_termination: true  # If true, restart episode when it terminates until max_timestep is reached
-                                        # - When true: Episode continues to restart after termination until max_timestep
-                                        # - When false: Episode ends immediately upon termination (standard behavior)
-                                        # - Useful for training scenarios where you want continuous learning
-                                        # - Termination conditions still apply (height reached, agent fallen, etc.)
-                                        # - Each restart maintains the same episode context but resets agent positions
     
     # === OBSERVATION SETTINGS ===
     include_time: false              # Include time remaining (0-1) in observations
@@ -209,8 +88,8 @@ environment:
 # Model Architecture - LIGHTWEIGHT FOR BOXJUMP
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 256                # Attention embedding dimension (reduced from 256)
-  hidden_size: 512                  # Hidden layer size for networks (reduced from 526)
+  embedding_dim: 128                # Attention embedding dimension (reduced from 256)
+  hidden_size: 256                  # Hidden layer size for networks (reduced from 526)
   model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
@@ -225,9 +104,9 @@ training:
   max_grad_norm: 200               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.98                         # GAE lambda parameter
-  batch_size: 1024                    # Training batch size
-  min_learning_rate: 1e-5       # Minimum learning rate for scheduler
-  similarity_loss_coef: 0.00000         # Cooperation loss (higher = more coordinated behavior)
+  batch_size: 2048
+  min_learning_rate: 0.5e-5       # Minimum learning rate for scheduler
+  similarity_loss_coef: 0.000001         # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.5          # Max cap for similarity loss to prevent instability
   num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
 
@@ -237,100 +116,3 @@ logging:
   save_interval: 100                # Save model checkpoint every N episodes  
   save_best_model: true             # Save best performing model
   stats_update_frequency: 50      # Update statistics graphs and JSON every N episodes (default: 100)
-
-# === REWARD SYSTEM ANALYSIS ===
-#
-# UNDERSTANDING REWARD MAGNITUDES:
-# With current settings (num_boxes=6, penalty_fall=20, max_timestep=2048):
-#
-# POSITIVE REWARDS ("highest" mode):
-#   - Building 1-box tower: +1/6 = +0.167 reward to ALL agents
-#   - Building 2-box tower: +2/6 = +0.333 reward to ALL agents  
-#   - Building 6-box tower: +6/6 = +1.000 reward to ALL agents
-#   - Cooperative: All agents benefit equally from any agent's success
-#
-# EXPONENTIAL REWARDS ("highest_exp" mode):
-#   - Height 0→1: (2^1 - 2^0)/6 = 1/6 = +0.167 reward to ALL agents
-#   - Height 1→2: (2^2 - 2^1)/6 = 2/6 = +0.333 reward to ALL agents
-#   - Height 2→3: (2^3 - 2^2)/6 = 4/6 = +0.667 reward to ALL agents
-#   - Height 3→4: (2^4 - 2^3)/6 = 8/6 = +1.333 reward to ALL agents
-#   - Height 4→5: (2^5 - 2^4)/6 = 16/6 = +2.667 reward to ALL agents
-#   - Higher towers become exponentially more valuable, harder for critic to predict
-#   - Makes final tower heights much more important than intermediate progress
-#
-# NEGATIVE REWARDS (fall penalty):
-#   - Falling agent: -20/2048 = -0.00977 per step (individual only)
-#   - Fall for 100 steps: -0.977 total (roughly cancels 1-box achievement)
-#   - Fall entire episode: -20.0 total (much worse than any positive reward)
-#
-# REWARD BALANCE:
-#   - Positive rewards are immediate and shared (encourages cooperation)
-#   - Negative rewards are individual and continuous (discourages reckless behavior)
-#   - Fall penalty is severe enough to prevent careless actions
-#   - Tower rewards scale with height (higher towers = bigger shared success)
-
-# === DIFFICULTY PROGRESSION GUIDE ===
-# 
-# EASY (Learning Basics):
-#   num_boxes: 2-3, fixed_rotation: true, reward_mode: "highest"
-#   gravity: 8, spacing: 2.0, episodes: 1000
-#
-# MEDIUM (Standard Training):  
-#   num_boxes: 4-6, fixed_rotation: true, reward_mode: "highest_stable"
-#   gravity: 10, spacing: 1.5, episodes: 2000
-#
-# HARD (Advanced Coordination):
-#   num_boxes: 8-12, fixed_rotation: false, reward_mode: "highest_exp"
-#   gravity: 12, penalty_fall: 30, episodes: 3000
-#
-# EXPERT (Maximum Challenge):
-#   num_boxes: 16, fixed_rotation: false, reward_mode: "highest_stable_exp"
-#   gravity: 15, penalty_fall: 50, random_spacing: 1.0, episodes: 5000
-#   gravity: 15, penalty_fall: 50, random_spacing: 1.0, episodes: 5000
-
-# === ACTION SPACE ===
-# 4 discrete actions per agent:
-#   0 = do nothing
-#   1 = apply force to the left  
-#   2 = apply force to the right
-#   3 = jump (only works if agent is stable)
-
-# === OBSERVATION SPACE ===
-# 13-dimensional vector per agent (when using default settings):
-#   0: Horizontal position (normalized -1 to 1)
-#   1: Height above floor (0 = on floor, n = n boxes high)
-#   2-3: Velocity (vx, vy)
-#   4: Angle in quarter turns (-0.5 to 0.5)
-#   5: Angular velocity  
-#   6-9: Raycast distances (left, right, up, down)
-#   10: Whether box can currently jump (0/1)
-#   11: Highest y-coordinate achieved this episode
-#   12: Time remaining (0 to 1)
-#
-# Additional dimensions if enabled:
-#   +1 if include_highest: false
-#   +1 if include_time: false  
-#   +num_boxes if agent_one_hot: true
-
-# === DYNAMIC AGENT TRAINING USAGE ===
-# To enable dynamic agent training:
-# 1. Set dynamic_agents.enabled: true
-# 2. Configure agent_counts with desired range (e.g., [2, 3, 4, 5, 6, 7, 8])
-# 3. Enable adaptive_termination if you want termination height to scale with agent count
-# 4. The system will randomly select agent count for each episode
-# 5. Model will be sized for the maximum agent count in the list
-# 6. Termination height will be calculated as: num_agents + 0.5 (if adaptive)
-#
-# Benefits:
-# - Trains a single model that works well with varying team sizes
-# - Improves generalization and robustness
-# - Especially effective for BoxJump where optimal tower height scales with team size
-# - Can discover strategies that work across different cooperation scenarios
-
-# === TRAINING TIPS ===
-# 1. Start with fixed_rotation=true for faster initial learning
-# 2. Use "highest" reward mode for pure cooperation
-# 3. Increase num_boxes gradually as performance improves
-# 4. Use render_mode="human" to watch training progress
-# 5. Higher similarity_loss_coef encourages more coordination
-# 6. Lower learning rates may be needed for larger num_boxes 

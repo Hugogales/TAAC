@@ -62,6 +62,7 @@ class TAACLogger:
         if self.env_name == "boxjump":
             self.env_specific_metrics = {
                 "max_height": [],
+                "episode_restarts": [],
             }
         elif self.env_name == "mpe_simple_spread":
             self.env_specific_metrics = {
@@ -116,6 +117,8 @@ class TAACLogger:
         if self.env_name == "boxjump":
             if "max_height" in env_metrics:
                 self.env_specific_metrics["max_height"].append(env_metrics["max_height"])
+            if "episode_restarts" in env_metrics:
+                self.env_specific_metrics["episode_restarts"].append(int(env_metrics["episode_restarts"]))
                 
         elif self.env_name == "mpe_simple_spread":
             if "coverage_area" in env_metrics:
@@ -174,6 +177,8 @@ class TAACLogger:
             if self.env_name == "boxjump":
                 if "max_height" in env_metrics:
                     env_str += f"Max Height: {env_metrics['max_height']:.2f}, "
+                if "episode_restarts" in env_metrics:
+                    env_str += f"Restarts: {int(env_metrics['episode_restarts'])}, "
                     
             elif self.env_name == "mpe_simple_spread":
                 if "coverage_area" in env_metrics:
@@ -307,6 +312,11 @@ class TAACLogger:
                     print(f"   Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}")
                     for i in tqdm(range(1), desc=f"Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}"):
                         pass
+                restarts = [int(m.get("episode_restarts", 0)) for m in env_metrics_list if m]
+                if any(r is not None for r in restarts):
+                    print(f"   Individual Restarts: {restarts}")
+                    for i in tqdm(range(1), desc=f"Individual Restarts: {restarts}"):
+                        pass
                     
             elif self.env_name == "mpe_simple_spread":
                 collisions = [m.get("collision_count", 0) for m in env_metrics_list if m and "collision_count" in m]
@@ -381,6 +391,8 @@ class TAACLogger:
         if self.env_name == "boxjump":
             if 'avg_max_height' in stats:
                 print(f"  # Max Height: {stats['avg_max_height']:.2f}")
+            if 'avg_episode_restarts' in stats:
+                print(f"  # Avg Restarts: {stats['avg_episode_restarts']:.2f}")
         elif self.env_name == "mpe_simple_spread":
             if 'avg_collision_count' in stats:
                 print(f"  ! Avg Collisions: {stats['avg_collision_count']:.1f}")
