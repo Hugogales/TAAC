@@ -61,6 +61,7 @@ def find_model_path(base_path: str, env_name: str) -> str:
     
     # Look for model in standard locations
     search_paths = [
+        base_path,
         f"files/Models/{env_name}/best_model.pth",
         f"files/Models/{env_name}_best.pth",
         f"Models/{env_name}/best_model.pth",

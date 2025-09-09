@@ -318,7 +318,7 @@ class TAACEnvironmentWrapper:
         
         # Store BoxJump-specific termination parameters
         self.termination_max_height = env_kwargs.get('termination_max_height', None)
-        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self.termination_reward_coef = env_kwargs.get('termination_reward_coef', 0.0)
         self._episode_terminated = False  # Track if episode has been terminated early
         
         # Apply standardization wrappers if requested
@@ -381,7 +381,7 @@ class TAACEnvironmentWrapper:
             # Also set termination reward if specified
             adaptive_config = self.dynamic_config.get('adaptive_termination', {})
             if 'base_reward' in adaptive_config:
-                env_kwargs['termination_reward'] = adaptive_config['base_reward']
+                env_kwargs['termination_reward_coef'] = adaptive_config['base_reward']
                 
         return env_kwargs
     
@@ -390,7 +390,7 @@ class TAACEnvironmentWrapper:
         return {
             'agent_count': self.current_agent_count,
             'termination_height': self.current_termination_height,
-            'termination_reward': self.termination_reward,
+            'termination_reward_coef': self.termination_reward_coef,
             'dynamic_enabled': self._is_dynamic_agent_enabled()
         }
     
@@ -414,7 +414,7 @@ class TAACEnvironmentWrapper:
         
         # Update termination parameters
         self.termination_max_height = env_kwargs.get('termination_max_height', None)
-        self.termination_reward = env_kwargs.get('termination_reward', 0.0)
+        self.termination_reward_coef = env_kwargs.get('termination_reward_coef', 0.0)
         self._episode_terminated = False
         
         # Re-extract environment information
@@ -786,7 +786,7 @@ ENV_CONFIGS = {
             'render_mode': None,  # None for training, "human" for visualization
             'max_timestep': 500,  # BoxJump uses max_timestep, not max_cycles
             'termination_max_height': 10.0,  # Terminate episode when this height is reached
-            'termination_reward': 100.0  # Final reward given to all agents when max height is reached
+            'termination_reward_coef': 100.0  # Multiplier for termination reward
         },
         'training_config': {
             'gamma': 0.995,  # Higher gamma for delayed tower-building rewards

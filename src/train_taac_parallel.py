@@ -204,9 +204,9 @@ class PersistentWorker:
             # Update termination height if specified
             if termination_height is not None:
                 updated_env_kwargs['termination_max_height'] = termination_height
-                if 'termination_reward' not in updated_env_kwargs:
+                if 'termination_reward_coef' not in updated_env_kwargs:
                     adaptive_config = self.dynamic_config.get('adaptive_termination', {})
-                    updated_env_kwargs['termination_reward'] = adaptive_config.get('base_reward', 100.0)
+                    updated_env_kwargs['termination_reward_coef'] = adaptive_config.get('base_reward', 100.0)
             
             # Close current environment and create new one
             if self.env_wrapper:

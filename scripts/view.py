@@ -75,7 +75,7 @@ Examples:
                        help='Path to trained model file (overrides config load_model)')
     parser.add_argument('--episodes', type=int, default=5,
                        help='Number of episodes to display (default: 5)')
-    parser.add_argument('--render_delay', type=float, default=0.05,
+    parser.add_argument('--render_delay', type=float, default=0.0,
                        help='Delay between steps in seconds (default: 0.05)')
     parser.add_argument('--non_interactive', action='store_true',
                        help='Run without waiting for user input between episodes')
@@ -100,6 +100,7 @@ Examples:
             else:
                 model_path = config.get('load_model', None)
             
+            print(model_path)
             model_path = find_model_path(model_path, env_name)
             print(f"=> Using model: {model_path}")
             
