@@ -93,6 +93,7 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
     episode_entropies = []
     step_count = 0
     done = False
+    episode_restarts = 0
     
     # Track environment-specific metrics
     all_states = []
@@ -115,6 +116,12 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
         all_states.append(next_states)
         all_rewards.append(rewards)
         all_infos.append(env_info)
+        # Count internal restarts triggered by wrapper (only if reached top height)
+        try:
+            if isinstance(env_info, dict) and env_info.get('auto_reset') and env_info.get('reached_termination_height'):
+                episode_restarts += 1
+        except Exception:
+            pass
         
         # Update state and reward tracking
         states = next_states
@@ -122,6 +129,8 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
         step_count += 1
         
         if done:
+            # If we want to continue accumulating to max_steps, we'd reset here.
+            # In single-env runner we end the outer episode on first termination.
             break
     
     # Calculate normalized entropy for this episode
@@ -142,6 +151,11 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
     final_info = all_infos[-1] if all_infos else {}
     
     env_metrics = extract_environment_metrics(env_name, final_states, final_rewards, final_info, all_states_history=all_states)
+    try:
+        if isinstance(env_metrics, dict):
+            env_metrics['episode_restarts'] = int(episode_restarts)
+    except Exception:
+        pass
     
     return episode_reward, normalized_entropy, env_metrics
 

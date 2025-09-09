@@ -12,20 +12,29 @@
 #SBATCH --account=undergrad_research
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=32
-#SBATCH --job-name=H-BOX-07
-#SBATCH --output=jobs/boxjump/TAAC_07/slurm.out
-#SBATCH --error=jobs/boxjump/TAAC_07/slurm.err
+#SBATCH --job-name=H-BOX-34
+#SBATCH --output=jobs/boxjump/TAAC_34/slurm.out
+#SBATCH --error=jobs/boxjump/TAAC_34/slurm.err
 
 echo "Running on node: $(hostname)"
 echo "Time: $(date)"
 
-# Activate virtual environment (if required by your setup)
+# Initialize conda in this non-interactive shell
 echo "Initializing conda environment for SLURM..."
-source /home/garrido-lestacheh/miniconda3/etc/profile.d/conda.sh
+if [ -f /usr/local/miniforge/miniforge3/etc/profile.d/conda.sh ]; then
+    source /usr/local/miniforge/miniforge3/etc/profile.d/conda.sh
+elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/mambaforge/etc/profile.d/conda.sh" ]; then
+    source "$HOME/mambaforge/etc/profile.d/conda.sh"
+else
+    echo "ERROR: Could not find conda.sh. Tried /usr/local/miniforge/miniforge3 and $HOME paths."
+    exit 1
+fi
 
 # Activate TAAC environment
 echo "Activating taac environment..."
-conda activate taac
+conda activate taac || { echo "ERROR: Failed to activate 'taac' conda env."; conda info --envs; exit 1; }
 echo "Conda environment activated"
 
 # Verify environment

@@ -143,6 +143,18 @@ class PersistentWorker:
         """Setup environment, device, and model for this worker"""
         print(f"Initializing Worker {self.worker_id} (PID: {os.getpid()}, GPU: {self.gpu_id})")
         
+        # Deterministic seeding per worker to ensure cloned policies behave identically
+        base_seed = int(os.environ.get("TAAC_BASE_SEED", "0"))
+        worker_seed = base_seed + int(self.worker_id)
+        try:
+            random.seed(worker_seed)
+            np.random.seed(worker_seed)
+            torch.manual_seed(worker_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(worker_seed)
+        except Exception as _seed_err:
+            print(f"Warning: Failed setting seeds in worker {self.worker_id}: {_seed_err}")
+        
         # Initialize pygame for this process if rendering is enabled
         if self.env_kwargs.get('render_mode') == 'human':
             try:
@@ -188,7 +200,12 @@ class PersistentWorker:
         # Update model with new state dict
         if model_state_dict:
             try:
-                self.model.load_state_dict(model_state_dict)
+                # Ensure tensors are on CPU before loading to avoid device pickling issues
+                cpu_state = {k: (v.cpu() if isinstance(v, torch.Tensor) else v) for k, v in model_state_dict.items()}
+                self.model.load_state_dict(cpu_state)
+                # Re-affirm device placement after loading
+                if hasattr(self.model, 'assign_device'):
+                    self.model.assign_device(self.device)
             except Exception as e:
                 print(f"Warning: Could not load state dict in worker {self.worker_id}: {e}")
         
@@ -227,6 +244,9 @@ class PersistentWorker:
         episode_entropies = []
         step_count = 0
         done = False
+        episode_restarts = 0
+        # Robust per-outer-episode max-height tracker (includes pre-reset terminal height)
+        robust_max_height = float('-inf')
             
         # Track environment-specific metrics
         all_states = []
@@ -235,8 +255,15 @@ class PersistentWorker:
             
         print(f"Worker {self.worker_id}: Starting episode {episode_num}")
             
+        # Determine target number of steps for this outer episode
+        target_steps = self.env_kwargs.get('max_timestep', self.max_steps)
+        
+        def _resets_on_termination() -> bool:
+            # Use wrapper-managed flag; do not depend on underlying env attribute
+            return bool(getattr(self.env_wrapper, 'auto_reset_on_termination', False))
+
         # Main episode loop
-        while not done and step_count < self.max_steps:
+        while step_count < target_steps:
             # IMPORTANT: This also stores states and actions in the memory
             train_actions, train_log_probs, train_entropies = self.model.get_actions(states)
                 
@@ -254,13 +281,39 @@ class PersistentWorker:
             all_states.append(next_states)
             all_rewards.append(rewards)
             all_infos.append(env_info)
+            # Count internal restarts triggered by the wrapper
+            try:
+                if isinstance(env_info, dict) and env_info.get('auto_reset'):
+                    if env_info.get('reached_termination_height'):
+                        episode_restarts += 1
+            except Exception:
+                pass
+            # Update robust max using current step observations
+            if self.env_name == 'boxjump':
+                try:
+                    step_heights = [state[1] for state in next_states if hasattr(state, '__len__') and len(state) > 1]
+                    if step_heights:
+                        robust_max_height = max(robust_max_height, max(step_heights))
+                    # If wrapper recorded the pre-reset max height, include it
+                    if isinstance(env_info, dict) and 'pre_reset_max_height' in env_info:
+                        robust_max_height = max(robust_max_height, float(env_info['pre_reset_max_height']))
+                    # As a fallback lower bound, include termination target
+                    if isinstance(env_info, dict) and env_info.get('reached_termination_height') and getattr(self.env_wrapper, 'termination_max_height', None) is not None:
+                        robust_max_height = max(robust_max_height, float(self.env_wrapper.termination_max_height))
+                except Exception:
+                    pass
                 
             # Update state and reward tracking
             states = next_states
             episode_reward += sum(rewards)
             step_count += 1
-                
-            if done:
+            
+            # If environment terminated but is configured to auto-restart, reset and continue
+            if done and _resets_on_termination() and step_count < target_steps:
+                states, _ = self.env_wrapper.reset()
+                # Manual reset here is not height-conditioned; do not increment restarts unless wrapper flagged it
+                done = False
+            elif done:
                 break
             
         # Calculate normalized entropy for this episode
@@ -284,6 +337,16 @@ class PersistentWorker:
             self.env_name, final_states, final_rewards, final_info, 
             all_states_history=all_states
         )
+
+        # Attach restart count to env metrics for logging/analysis
+        try:
+            if isinstance(env_metrics, dict):
+                env_metrics['episode_restarts'] = int(episode_restarts)
+                if self.env_name == 'boxjump' and robust_max_height != float('-inf'):
+                    existing = env_metrics.get('max_height', 0.0)
+                    env_metrics['max_height'] = max(float(existing), float(robust_max_height))
+        except Exception:
+            pass
 
         return (episode_reward, normalized_entropy, env_metrics), self.model.memories
     
@@ -370,7 +433,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
         print(f"🎲 Dynamic Agent Training ENABLED:")
         print(f"   Agent counts: {agent_counts}")
         if dynamic_config.get('adaptive_termination', {}).get('enabled', False):
-            height_formula = dynamic_config.get('adaptive_termination', {}).get('height_formula', 'num_agents + 0.5')
+            height_formula = dynamic_config.get('adaptive_termination', {}).get('height_formula', 'num_agents')
             print(f"   Adaptive termination: {height_formula}")
     
     # Create sample environment to get info (with dynamic config if enabled)
@@ -466,19 +529,20 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
                 # Calculate adaptive termination if enabled
                 adaptive_config = dynamic_config.get('adaptive_termination', {})
                 if adaptive_config.get('enabled', False):
-                    height_formula = adaptive_config.get('height_formula', 'num_agents + 0.5')
+                    height_formula = adaptive_config.get('height_formula', 'num_agents')
                     if 'num_agents' in height_formula:
                         formula_parts = height_formula.replace('num_agents', str(current_agent_count))
                         try:
                             current_termination_height = eval(formula_parts)
                         except:
-                            current_termination_height = current_agent_count + 0.5
+                            current_termination_height = current_agent_count 
                     else:
                         current_termination_height = float(height_formula)
                     print(f"   Termination height: {current_termination_height}")
             
             # Send tasks to workers (one episode per worker)
-            model_state_dict = train_model.state_dict()
+            # Always share CPU tensors to avoid CUDA device mismatch across processes
+            model_state_dict = {k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v) for k, v in train_model.state_dict().items()}
             for i in range(num_parallel_games):
                 # Include current agent count and termination height in task
                 task_data = {
