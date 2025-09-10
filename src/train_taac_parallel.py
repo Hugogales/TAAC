@@ -64,14 +64,15 @@ BASE_SAVE_DIR = "files"
 BASE_LOG_DIR = "files/experiments"
 
 
-def setup_paths(env_name: str, job_name: str) -> Tuple[str, str]:
-    """Create unique directories for saving models and logs using standard structure."""
-    
-    # Standard directory structure: organized by environment, then by job_name
-    save_dir = os.path.join("files", "Models", env_name, job_name)
+def setup_paths(env_name: str, model_name: str, job_name: str) -> Tuple[str, str]:
+    """Create directories including model name:
+    files/Models/{env_name}/{model_name}/{job_name}
+    files/experiments/{env_name}/{model_name}/{job_name}
+    """
+    save_dir = os.path.join("files", "Models", env_name, model_name, job_name)
     os.makedirs(save_dir, exist_ok=True)
     
-    log_dir = os.path.join("files", "experiments", env_name, job_name)  
+    log_dir = os.path.join("files", "experiments", env_name, model_name, job_name)
     os.makedirs(log_dir, exist_ok=True)
     
     return save_dir, log_dir
@@ -415,8 +416,9 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     job_name = config['job_name']
     dynamic_config = config.get('dynamic_agents', {})
     
-    # Setup paths using standard structure: files/{Models|experiments}/{env_name}/{job_name}/
-    save_dir, log_dir = setup_paths(env_name, job_name)
+    # Setup paths using standard structure: files/{Models|experiments}/{env_name}/{model_name}/{job_name}/
+    model_name = resolve_model_name(config)
+    save_dir, log_dir = setup_paths(env_name, model_name, job_name)
     
     # Save configuration
     save_config(config, log_dir)
@@ -468,7 +470,6 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     print(f"  - Action type: discrete")
     
     # Initialize model from config
-    model_name = resolve_model_name(config)
     ModelClass = get_model_class(model_name)
     print(f"=> Using model: {model_name}")
     train_model = ModelClass(env_config, training_config, mode="train")

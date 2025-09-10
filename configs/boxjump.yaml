@@ -1,18 +1,15 @@
-# === EXPERIMENT CONFIGURATION ===
-# Define variables here for easy version management
-# TO CREATE A NEW EXPERIMENT VERSION:
-# 1. Change job_name below (e.g., "boxjump_TAAC_09")  
-# 2. All paths will be automatically constructed from job_name!
 
-# Main experiment variables - CHANGE THESE TO CREATE NEW VERSIONS
-job_name: &job_name "TAAC_34"
+job_name: &job_name "01"
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 
-# === DYNAMIC AGENT TRAINING CONFIGURATION ===
-# This configuration enables training with variable number of agents per episode
-# The system will randomly select the number of agents for each episode from a specified list
-# Termination height is automatically adjusted based on the number of agents
+algorithm:
+  name: "TAAC"
+
+#load_model: "files/Models/boxjump/TAAC_001/TAAC_26_ep21000.pth"  # Path to model file to load (or null to train from scratch)
+load_model: null
+job_name: *job_name
+
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
   agent_counts: [3, 4]  # List of possible agent counts to randomly choose from
@@ -21,74 +18,10 @@ dynamic_agents:
   adaptive_termination:
     enabled: true                    # Enable adaptive termination height
     height_formula: "num_agents + 0.1"  # Formula for calculating termination height
-    base_reward: 200.0              # Base termination reward
     
-  # Override standard environment settings when dynamic agents are enabled
-  # These will be ignored in favor of dynamic configuration
   override_num_agents: true         # When true, ignores env_kwargs.num_boxes
   override_termination: true        # When true, ignores env_kwargs.termination_max_height
 
-# === REWARD TUNING GUIDE ===
-load_model: "files/Models/boxjump/TAAC_26/TAAC_26_ep21000.pth"  # Path to model file to load (or null to train from scratch)
-#load_model: null
-job_name: *job_name
-
-environment:
-  name: *env_name
-  env_kwargs:
-    # === CORE ENVIRONMENT SETTINGS ===
-    num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
-    world_width: 3                 # Environment width in Box2D units
-    world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 64               # Episode length in steps (minimal to avoid indexing bug)
-    
-    # === BOX PHYSICS SETTINGS ===
-    box_width: 1.0                  # Width of each box agent
-    box_height: 1.0                 # Height of each box agent
-    fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
-    reward_only_biggest_tower: true # Only reward agents in tallest tower chain
-    gravity: 10                     # Gravity force (higher = faster falling)
-    friction: 0.8                   # Friction between boxes (0-1, higher = less slippery)
-    angular_damping: 1              # Prevents excessive spinning (higher = less spinning)
-    physics_steps_per_action: 8     # How many physics steps per environment step (action duration)
-    physics_timestep_multiplier: 2.0 # Multiplier for physics timestep (time passes faster)
-    
-    # === STARTING POSITIONS ===
-    spacing: 1.5                    # Horizontal spacing between boxes at start
-    random_spacing: 0.5             # Randomness in starting positions (0 = fixed positions)
-    
-    reward_mode: "dense_height_sq"          # Reward scheme - Choose based on desired behavior:
-    
-    penalty_fall: 20                # Fall penalty - HOW IT WORKS:
-    termination_max_height: 4.5     # Terminate episode when this height is reached
-    termination_reward_coef: 500.0       # Reward given to all agents when termination height is reached    
-    
-    # === FALL TERMINATION PARAMETERS ===
-    termination_on_fall: true      # If true, episode terminates when any agent falls off
-    penalty_fall_termination: -100.0 # Penalty given only to the fallen agent when termination_on_fall=true
-                                    # (Only applies when termination_on_fall=true)
-                                    # - Normal penalty_fall applies when termination_on_fall=false
-                                    # - This is a one-time penalty for the specific agent that caused termination
-    
-    # === EPISODE RESET PARAMETERS ===
-    reset_episode_on_termination: true  # If true, restart episode when it terminates until max_timestep is reached
-    
-    # === OBSERVATION SETTINGS ===
-    include_time: false              # Include time remaining (0-1) in observations
-    include_highest: false           # Include current best height in observations
-    include_num_boxes: true         # Include number of boxes in observations (useful for dynamic agents)
-    agent_one_hot: false            # Include agent ID as one-hot vector in observations
-    
-    # === RENDERING ===
-    #render_mode: "human"                   # null = no rendering (training), "human" = PyGame window
-    render_mode: null                   # null = no rendering (training), "human" = PyGame window
-    
-  apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
-
-# Model Architecture - LIGHTWEIGHT FOR BOXJUMP
-algorithm:
-  name: "MAAC"
- 
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
   embedding_dim: 128                # Attention embedding dimension (reduced from 256)
@@ -112,6 +45,48 @@ training:
   similarity_loss_coef: 0.000001         # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.5          # Max cap for similarity loss to prevent instability
   num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
+
+environment:
+  name: *env_name
+  env_kwargs:
+
+    reward_mode: "dense_height_cube"          # Reward scheme - Choose based on desired behavior:
+    termination_reward_coef: 500.0       # Reward given to all agents when termination height is reached    
+    termination_max_height: 9.5     # Terminate episode when this height is reached
+
+    penalty_fall_termination: -100.0 # Penalty given only to the fallen agent when termination_on_fall=true
+    termination_on_fall: true      # If true, episode terminates when any agent falls off
+    reset_episode_on_termination: true  # restart episode when it terminates until max_timestep is reached
+    penalty_fall: 20                # penalty for falling per step
+
+    # === CORE ENVIRONMENT SETTINGS ===
+    num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
+    max_timestep:  64               # Episode length in steps (minimal to avoid indexing bug)
+    box_width: 1.0                  # Width of each box agent
+    box_height: 1.0                 # Height of each box agent
+    fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
+    reward_only_biggest_tower: true # Only reward agents in tallest tower chain
+    gravity: 10                     # Gravity force (higher = faster falling)
+    friction: 0.8                   # Friction between boxes (0-1, higher = less slippery)
+    angular_damping: 1              # Prevents excessive spinning (higher = less spinning)
+    physics_steps_per_action: 8     # How many physics steps per environment step (action duration)
+    physics_timestep_multiplier: 2.0 # Multiplier for physics timestep (time passes faster)
+    
+    # === STARTING POSITIONS ===
+    spacing: 1.5                    # Horizontal spacing between boxes at start
+    random_spacing: 0.5             # Randomness in starting positions (0 = fixed positions)
+    
+    # === OBSERVATION SETTINGS ===
+    include_time: false              # Include time remaining (0-1) in observations
+    include_highest: false           # Include current best height in observations
+    include_num_boxes: true         # Include number of boxes in observations (useful for dynamic agents)
+    agent_one_hot: false            # Include agent ID as one-hot vector in observations
+    
+    # === RENDERING ===
+    #render_mode: "human"                   # null = no rendering (training), "human" = PyGame window
+    render_mode: null                   # null = no rendering (training), "human" = PyGame window
+    
+  apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
 
 # Logging & Evaluation
 logging:

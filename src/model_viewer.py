@@ -103,6 +103,7 @@ def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dic
     
     # Create agent from config
     model_name = resolve_model_name(config)
+    print(f"=> Resolved model from config: {model_name}")
     ModelClass = get_model_class(model_name)
     taac_agent = ModelClass(env_config, training_config, mode="test")
     
@@ -153,6 +154,7 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
             try:
                 pygame.init()
                 pygame.display.set_caption(f"TAAC Model Viewer - {env_name} - Episode {episode + 1}")
+                clock = pygame.time.Clock()
                 pygame_initialized = True
                 print(f"=> Pygame window opened for episode {episode + 1}")
             except Exception as e:
@@ -173,6 +175,20 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
                 episode_metrics = []
                 
                 while not done and step_count < max_steps:  # Max steps per episode
+                    # Process window events to keep Pygame responsive
+                    if pygame_initialized:
+                        for event in pygame.event.get():
+                            if event.type == pygame.QUIT:
+                                done = True
+                                break
+                            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                                done = True
+                                break
+                        if done:
+                            break
+                        # Keep event queue pumped and limit loop FPS
+                        pygame.event.pump()
+                        clock.tick(60)
                     # Get actions from the agent
                     actions, _log_probs, _entropies = taac_agent.get_actions(states)
                     
@@ -208,7 +224,8 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
                         step_info += f", Traffic: {env_metrics['traffic_flow']:.2f}"
                     
                     print(step_info)
-                    time.sleep(render_delay)  # Control visualization speed
+                    if render_delay and render_delay > 0:
+                        time.sleep(render_delay)  # Control visualization speed
 
                     if dones:
                         done = True

@@ -73,6 +73,8 @@ Examples:
     # Live AI viewing options
     parser.add_argument('--model_path', type=str,
                        help='Path to trained model file (overrides config load_model)')
+    parser.add_argument('--model_name', type=str, default=None,
+                       help='Override algorithm/model to use: TAAC | PPO | MAAC')
     parser.add_argument('--episodes', type=int, default=5,
                        help='Number of episodes to display (default: 5)')
     parser.add_argument('--render_delay', type=float, default=0.0,
@@ -92,6 +94,11 @@ Examples:
             # Live AI viewing mode
             print(f"=> Loading configuration from: {args.config}")
             config = load_config(args.config)
+
+            # Optional: override model/algorithm via CLI
+            if args.model_name:
+                config.setdefault('algorithm', {})['name'] = args.model_name
+                print(f"=> Overriding model to: {args.model_name}")
             
             # Find model path
             env_name = config['environment']['name']
@@ -100,7 +107,6 @@ Examples:
             else:
                 model_path = config.get('load_model', None)
             
-            print(model_path)
             model_path = find_model_path(model_path, env_name)
             print(f"=> Using model: {model_path}")
             

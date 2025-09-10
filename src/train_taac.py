@@ -28,14 +28,17 @@ BASE_SAVE_DIR = "files"
 BASE_LOG_DIR = "files/experiments"
 
 
-def setup_paths(env_name: str, job_name: str) -> Tuple[str, str]:
-    """Create unique directories for saving models and logs using standard structure."""
+def setup_paths(env_name: str, model_name: str, job_name: str) -> Tuple[str, str]:
+    """Create unique directories for saving models and logs using standard structure.
+    Structure:
+      files/Models/{env_name}/{model_name}/{job_name}
+      files/experiments/{env_name}/{model_name}/{job_name}
+    """
     
-    # Standard directory structure: organized by environment, then by job_name
-    save_dir = os.path.join("files", "Models", env_name, job_name)
+    save_dir = os.path.join("files", "Models", env_name, model_name, job_name)
     os.makedirs(save_dir, exist_ok=True)
     
-    log_dir = os.path.join("files", "experiments", env_name, job_name)  
+    log_dir = os.path.join("files", "experiments", env_name, model_name, job_name)
     os.makedirs(log_dir, exist_ok=True)
     
     return save_dir, log_dir
@@ -166,7 +169,8 @@ def train_taac(config: Dict[str, Any]):
     """
     # Setup paths and logging
     env_name = config['environment']['name']
-    save_dir, log_dir = setup_paths(env_name, config['job_name'])
+    model_name = resolve_model_name(config)
+    save_dir, log_dir = setup_paths(env_name, model_name, config['job_name'])
     actual_job_name = os.path.basename(save_dir)
     
     # Save configuration

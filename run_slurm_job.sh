@@ -5,6 +5,9 @@
 # This script takes one argument: a unique job name for the experiment.
 # This job name is used to create a dedicated directory for logs, models,
 # and statistics, keeping your experiments organized.
+# nameing = T-BOX-01 = boxjump/taac/01
+# naming = M-BOX-01 = boxjump/maac/01
+# naming = P-BOX-02 = boxjump/ppo/02
 
 # --- SBATCH Directives ---
 #SBATCH --partition=teaching
@@ -12,9 +15,9 @@
 #SBATCH --account=undergrad_research
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=32
-#SBATCH --job-name=H-BOX-34
-#SBATCH --output=jobs/boxjump/TAAC_34/slurm.out
-#SBATCH --error=jobs/boxjump/TAAC_34/slurm.err
+#SBATCH --job-name=T-BOX-01
+#SBATCH --output=jobs/boxjump/TAAC/01/slurm.out
+#SBATCH --error=jobs/boxjump/TAAC/01/slurm.err
 
 echo "Running on node: $(hostname)"
 echo "Time: $(date)"
