@@ -54,7 +54,7 @@ from tqdm import tqdm
 import math
 from functools import partial
 
-from .AI.TAAC import TAAC, Memory
+from .model_factory import resolve_model_name, get_model_class
 from .env_wrapper import TAACEnvironmentWrapper, create_env_config
 from .logger import TAACLogger, extract_environment_metrics, format_time
 
@@ -121,7 +121,7 @@ class PersistentWorker:
     """Persistent worker process that reuses environment for multiple episodes with dynamic agent support"""
     
     def __init__(self, worker_id: int, env_name: str, env_kwargs: Dict, max_steps: int, 
-                 env_config: Dict, training_config: Dict, gpu_id: Optional[int] = None, 
+                 env_config: Dict, training_config: Dict, model_name: str, gpu_id: Optional[int] = None, 
                  dynamic_config: Optional[Dict] = None):
         self.worker_id = worker_id
         self.env_name = env_name
@@ -130,6 +130,7 @@ class PersistentWorker:
         self.gpu_id = gpu_id
         self.env_config = env_config
         self.training_config = training_config
+        self.model_name = model_name
         self.dynamic_config = dynamic_config or {}
         self.env_wrapper = None
         self.device = None
@@ -188,7 +189,8 @@ class PersistentWorker:
         model_env_config['num_agents'] = self.max_agents
         
         # Create model for this worker
-        self.model = TAAC(model_env_config, self.training_config, mode="train")
+        ModelClass = get_model_class(self.model_name)
+        self.model = ModelClass(model_env_config, self.training_config, mode="train")
         if hasattr(self.model, 'assign_device'):
             self.model.assign_device(self.device)
         
@@ -368,11 +370,11 @@ class PersistentWorker:
 
 
 def worker_process(worker_id: int, env_name: str, env_kwargs: Dict, max_steps: int, 
-                  env_config: Dict, training_config: Dict, gpu_id: Optional[int], 
+                  env_config: Dict, training_config: Dict, model_name: str, gpu_id: Optional[int], 
                   task_queue, result_queue, dynamic_config: Optional[Dict] = None):
     """Persistent worker process function"""
     worker = PersistentWorker(worker_id, env_name, env_kwargs, max_steps, 
-                             env_config, training_config, gpu_id, dynamic_config)
+                             env_config, training_config, model_name, gpu_id, dynamic_config)
     
     try:
         while True:
@@ -403,7 +405,7 @@ def worker_process(worker_id: int, env_name: str, env_kwargs: Dict, max_steps: i
         worker.cleanup()
 
 
-def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> TAAC:
+def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     """
     Main training loop for TAAC algorithm (parallel environments with persistent workers)
     Supports dynamic agent training with variable agent counts per episode.
@@ -465,8 +467,11 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
     print(f"  - Action size: {env_config['action_size']}")
     print(f"  - Action type: discrete")
     
-    # Initialize TAAC agent
-    train_model = TAAC(env_config, training_config, mode="train")
+    # Initialize model from config
+    model_name = resolve_model_name(config)
+    ModelClass = get_model_class(model_name)
+    print(f"=> Using model: {model_name}")
+    train_model = ModelClass(env_config, training_config, mode="train")
     
     # Load model if specified
     if config.get('load_model'):
@@ -507,7 +512,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4) -> 
         worker = ctx.Process(
             target=worker_process,
             args=(i, env_name, config['environment'].get('env_kwargs', {}), 
-                  max_steps, env_config, training_config, gpu_id, task_queue, result_queue, dynamic_config)
+                  max_steps, env_config, training_config, model_name, gpu_id, task_queue, result_queue, dynamic_config)
         )
         worker.start()
         workers.append(worker)

@@ -15,7 +15,7 @@ model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
 # Termination height is automatically adjusted based on the number of agents
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [3, 4, 5, 6, 7, 8]  # List of possible agent counts to randomly choose from
+  agent_counts: [3, 4]  # List of possible agent counts to randomly choose from
   
   # Adaptive termination configuration
   adaptive_termination:
@@ -40,7 +40,7 @@ environment:
     num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
     world_width: 3                 # Environment width in Box2D units
     world_height: 6                 # Environment height in Box2D units  
-    max_timestep: 526               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep: 64               # Episode length in steps (minimal to avoid indexing bug)
     
     # === BOX PHYSICS SETTINGS ===
     box_width: 1.0                  # Width of each box agent
@@ -57,7 +57,7 @@ environment:
     spacing: 1.5                    # Horizontal spacing between boxes at start
     random_spacing: 0.5             # Randomness in starting positions (0 = fixed positions)
     
-    reward_mode: "dense_height_cube"          # Reward scheme - Choose based on desired behavior:
+    reward_mode: "dense_height_sq"          # Reward scheme - Choose based on desired behavior:
     
     penalty_fall: 20                # Fall penalty - HOW IT WORKS:
     termination_max_height: 4.5     # Terminate episode when this height is reached
@@ -86,6 +86,9 @@ environment:
   apply_wrappers: false             # Disable PettingZoo wrappers (BoxJump has custom format)
 
 # Model Architecture - LIGHTWEIGHT FOR BOXJUMP
+algorithm:
+  name: "MAAC"
+ 
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
   embedding_dim: 128                # Attention embedding dimension (reduced from 256)

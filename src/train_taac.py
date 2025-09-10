@@ -18,7 +18,7 @@ import pygame
 from tqdm import tqdm, trange
 import math
 
-from .AI.TAAC import TAAC
+from .model_factory import resolve_model_name, get_model_class
 from .env_wrapper import TAACEnvironmentWrapper, create_env_config
 from .logger import TAACLogger, extract_environment_metrics, format_time
 
@@ -81,7 +81,7 @@ def normalize_entropy(entropy_dict: Dict[str, float], num_actions: int) -> float
     return max(0.0, min(1.0, normalized))
 
 
-def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
+def run_single_game(train_model, env_wrapper: TAACEnvironmentWrapper,
                    max_steps: int, logger: TAACLogger, env_name: str) -> Tuple[float, int, float, Dict[str, Any]]:
     """Run a single game episode and return metrics"""
     
@@ -160,7 +160,7 @@ def run_single_game(train_model: TAAC, env_wrapper: TAACEnvironmentWrapper,
     return episode_reward, normalized_entropy, env_metrics
 
 
-def train_taac(config: Dict[str, Any]) -> TAAC:
+def train_taac(config: Dict[str, Any]):
     """
     Main training loop for TAAC algorithm (single environment)
     """
@@ -201,8 +201,11 @@ def train_taac(config: Dict[str, Any]) -> TAAC:
     print(f"  - Action size: {env_config['action_size']}")
     print(f"  - Action type: discrete")
     
-    # Initialize TAAC agent
-    train_model = TAAC(env_config, training_config, mode="train")
+    # Initialize model from config
+    model_name = resolve_model_name(config)
+    ModelClass = get_model_class(model_name)
+    print(f"=> Using model: {model_name}")
+    train_model = ModelClass(env_config, training_config, mode="train")
     
     # Load model if specified
     if config.get('load_model'):

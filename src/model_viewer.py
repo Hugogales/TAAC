@@ -16,7 +16,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .AI.TAAC import TAAC
+from .model_factory import resolve_model_name, get_model_class
 from .env_wrapper import TAACEnvironmentWrapper
 from .logger import extract_environment_metrics
 from tqdm import tqdm
@@ -75,7 +75,7 @@ def find_model_path(base_path: str, env_name: str) -> str:
     raise FileNotFoundError(f"Could not find model for {env_name}. Tried: {search_paths}")
 
 
-def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dict[str, Any]) -> TAAC:
+def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dict[str, Any]):
     """Load a trained TAAC model."""
     
     print(f"=> Loading model from: {model_path}")
@@ -101,8 +101,10 @@ def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dic
     print(f"  - Action size: {env_config['action_size']}")
     print(f"  - Action type: discrete")
     
-    # Create TAAC agent
-    taac_agent = TAAC(env_config, training_config, mode="test")
+    # Create agent from config
+    model_name = resolve_model_name(config)
+    ModelClass = get_model_class(model_name)
+    taac_agent = ModelClass(env_config, training_config, mode="test")
     
     # Load the saved model
     if not taac_agent.load_model(model_path):
