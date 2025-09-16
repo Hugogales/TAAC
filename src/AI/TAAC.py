@@ -50,6 +50,8 @@ class AttentionActorCriticNetwork(nn.Module):
         self.actor_embedding = nn.Sequential(
             nn.Linear(state_size, self.hidden_size),
             nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
             nn.Linear(self.hidden_size, embedding_dim),
         )
 
@@ -63,7 +65,7 @@ class AttentionActorCriticNetwork(nn.Module):
 
         # Actor output for discrete action space
         self.actor_out = nn.Sequential(
-            nn.Linear(embedding_dim, self.hidden_size),
+            nn.Linear(embedding_dim + embedding_dim, self.hidden_size),
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
@@ -75,6 +77,8 @@ class AttentionActorCriticNetwork(nn.Module):
 
         self.critic_embedding = nn.Sequential(
             nn.Linear(critic_input_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, embedding_dim),
         )
@@ -113,7 +117,7 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
-        #attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
+        attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
 
         action_logits = self.actor_out(attn_output) # [B, N, action_size]
         action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
@@ -135,7 +139,7 @@ class AttentionActorCriticNetwork(nn.Module):
         actor_input = self.actor_embedding(actor_input) # [B*N, embedding_dim]
         actor_input = actor_input.reshape(B, N, -1) # [B, N, embedding_dim]
         attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input) # [B, N, embedding_dim]
-        #attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
+        attn_output = torch.cat([attn_output, actor_input], dim=-1) # [B, N, 2*embedding_dim]
 
         # similarity loss 
         normalized_attn_output = attn_output / attn_output.norm(dim=-1, keepdim=True) # [B, N, embedding]

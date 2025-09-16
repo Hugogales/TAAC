@@ -48,6 +48,12 @@ class MLPActorCriticNetwork(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.action_size),
         )
 
@@ -58,10 +64,16 @@ class MLPActorCriticNetwork(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
             nn.Linear(self.hidden_size, 1),
         )
 
-        print(f"Network created with {sum(p.numel() for p in self.parameters())} parameters")
+        print(f"PPO Network created with {sum(p.numel() for p in self.parameters())} parameters")
         print(f"State size: {state_size}, Action size: {action_size}, Action type: discrete")
 
     def actor_forward(self, x: torch.Tensor) -> torch.Tensor:

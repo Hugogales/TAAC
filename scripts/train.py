@@ -30,7 +30,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.train_taac import train_taac
 from src.train_taac_parallel import train_taac_parallel
 from src.env_wrapper import TAACEnvironmentWrapper
-from src.AI.TAAC import TAAC
+from src.model_factory import resolve_model_name, get_model_class
 
 # Silence noisy third-party warnings that do not affect training
 warnings.filterwarnings(
@@ -69,7 +69,7 @@ def evaluate_agent(config: dict, model_path: str) -> None:
         **env_kwargs
     )
     
-    # Create TAAC agent
+    # Create agent based on configured model
     env_config = env_wrapper.env_info
     training_config = config.get('training', {})
     
@@ -77,10 +77,13 @@ def evaluate_agent(config: dict, model_path: str) -> None:
     if 'model' in config:
         training_config.update(config['model'])
     
+    model_name = resolve_model_name(config)
+    ModelClass = get_model_class(model_name)
+    print("=> Using model: {}".format(model_name))
     print("=> Loading model: {}".format(model_path))
-    taac_agent = TAAC(env_config, training_config, mode="test")
+    agent = ModelClass(env_config, training_config, mode="test")
     
-    if not taac_agent.load_model(model_path):
+    if not agent.load_model(model_path):
         raise RuntimeError("Failed to load model from: {}".format(model_path))
     
     print("=> Model loaded successfully!")
@@ -101,7 +104,7 @@ def evaluate_agent(config: dict, model_path: str) -> None:
         done = False
         
         while not done and step_count < 1000:
-            actions, _ = taac_agent.get_actions(list(states.values()))
+            actions, _ = agent.get_actions(list(states.values()))
             states, rewards, done, _ = env_wrapper.step(actions)
             
             episode_reward += sum(rewards)
