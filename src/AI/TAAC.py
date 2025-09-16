@@ -100,7 +100,7 @@ class AttentionActorCriticNetwork(nn.Module):
             nn.Linear(self.hidden_size, 1)
         )
 
-        print(f"Network created with {sum(p.numel() for p in self.parameters())} parameters")
+        print(f"TAAC Network created with {sum(p.numel() for p in self.parameters())} parameters")
         print(f"State size: {state_size}, Action size: {action_size}, Action type: discrete")
 
     def actor_forward(self, x):
@@ -562,6 +562,7 @@ class TAAC:
 
     def load_model(self, model_path: str, test=False) -> bool:
         """Load the model from the specified path."""
+        print(f"--> Loading model from {model_path}")
         if os.path.exists(model_path):
             if test:
                     # For evaluation, only load the main policy

@@ -96,7 +96,7 @@ def run_single_game(train_model, env_wrapper: TAACEnvironmentWrapper,
     episode_entropies = []
     step_count = 0
     done = False
-    episode_restarts = 0
+    episode_successes = 0
     
     # Track environment-specific metrics
     all_states = []
@@ -119,10 +119,10 @@ def run_single_game(train_model, env_wrapper: TAACEnvironmentWrapper,
         all_states.append(next_states)
         all_rewards.append(rewards)
         all_infos.append(env_info)
-        # Count internal restarts triggered by wrapper (only if reached top height)
+        # Count internal successes triggered by wrapper (only if reached top height)
         try:
             if isinstance(env_info, dict) and env_info.get('auto_reset') and env_info.get('reached_termination_height'):
-                episode_restarts += 1
+                episode_successes += 1
         except Exception:
             pass
         
@@ -156,7 +156,7 @@ def run_single_game(train_model, env_wrapper: TAACEnvironmentWrapper,
     env_metrics = extract_environment_metrics(env_name, final_states, final_rewards, final_info, all_states_history=all_states)
     try:
         if isinstance(env_metrics, dict):
-            env_metrics['episode_restarts'] = int(episode_restarts)
+            env_metrics['episode_successes'] = int(episode_successes)
     except Exception:
         pass
     
@@ -211,12 +211,19 @@ def train_taac(config: Dict[str, Any]):
     print(f"=> Using model: {model_name}")
     train_model = ModelClass(env_config, training_config, mode="train")
     
-    # Load model if specified
-    if config.get('load_model'):
-        if train_model.load_model(config['load_model']):
-            print(f"=> Loaded model from: {config['load_model']}")
+    # Load model if a valid path is provided; otherwise start from random initialization
+    load_path = config.get('load_model', None)
+    if isinstance(load_path, str):
+        cleaned = load_path.strip()
+        if cleaned == '' or cleaned.lower() in ('none', 'null', 'false'):
+            load_path = None
+    if load_path:
+        if os.path.exists(load_path) and train_model.load_model(load_path):
+            print(f"=> Loaded model from: {load_path}")
         else:
-            print(f"=> Failed to load model from: {config['load_model']}")
+            print(f"=> Starting from random initialization (no valid model to load: {load_path})")
+    else:
+        print("=> Starting from random initialization (no pre-trained weights)")
     
     # Training parameters
     episodes = training_config['episodes']

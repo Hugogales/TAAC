@@ -247,7 +247,7 @@ class PersistentWorker:
         episode_entropies = []
         step_count = 0
         done = False
-        episode_restarts = 0
+        episode_successes = 0
         # Robust per-outer-episode max-height tracker (includes pre-reset terminal height)
         robust_max_height = float('-inf')
             
@@ -288,7 +288,7 @@ class PersistentWorker:
             try:
                 if isinstance(env_info, dict) and env_info.get('auto_reset'):
                     if env_info.get('reached_termination_height'):
-                        episode_restarts += 1
+                        episode_successes += 1
             except Exception:
                 pass
             # Update robust max using current step observations
@@ -344,7 +344,7 @@ class PersistentWorker:
         # Attach restart count to env metrics for logging/analysis
         try:
             if isinstance(env_metrics, dict):
-                env_metrics['episode_restarts'] = int(episode_restarts)
+                env_metrics['episode_successes'] = int(episode_successes)
                 if self.env_name == 'boxjump' and robust_max_height != float('-inf'):
                     existing = env_metrics.get('max_height', 0.0)
                     env_metrics['max_height'] = max(float(existing), float(robust_max_height))
@@ -474,12 +474,19 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     print(f"=> Using model: {model_name}")
     train_model = ModelClass(env_config, training_config, mode="train")
     
-    # Load model if specified
-    if config.get('load_model'):
-        if train_model.load_model(config['load_model']):
-            print(f"=> Loaded model from: {config['load_model']}")
+    # Load model if a valid path is provided; otherwise start from random initialization
+    load_path = config.get('load_model', None)
+    if isinstance(load_path, str):
+        cleaned = load_path.strip()
+        if cleaned == '' or cleaned.lower() in ('none', 'null', 'false'):
+            load_path = None
+    if load_path:
+        if os.path.exists(load_path) and train_model.load_model(load_path):
+            print(f"=> Loaded model from: {load_path}")
         else:
-            print(f"=> Failed to load model from: {config['load_model']}")
+            print(f"=> Starting from random initialization (no valid model to load: {load_path})")
+    else:
+        print("=> Starting from random initialization (no pre-trained weights)")
     
     # Close sample environment
     sample_env.close()
@@ -522,7 +529,7 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     
     try:
         # Training loop
-        for epoch in tqdm(range(episodes), desc="Training TAAC Parallel"):
+        for epoch in tqdm(range(episodes), desc=f"Training {model_name} Parallel"):
             
             # For dynamic agent training, select agent count for this epoch
             current_agent_count = None

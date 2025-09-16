@@ -62,7 +62,7 @@ class TAACLogger:
         if self.env_name == "boxjump":
             self.env_specific_metrics = {
                 "max_height": [],
-                "episode_restarts": [],
+                "episode_successes": [],
             }
         elif self.env_name == "mpe_simple_spread":
             self.env_specific_metrics = {
@@ -117,8 +117,13 @@ class TAACLogger:
         if self.env_name == "boxjump":
             if "max_height" in env_metrics:
                 self.env_specific_metrics["max_height"].append(env_metrics["max_height"])
-            if "episode_restarts" in env_metrics:
-                self.env_specific_metrics["episode_restarts"].append(int(env_metrics["episode_restarts"]))
+            # Accept both new and legacy keys, store under standardized name
+            if "episode_successes" in env_metrics:
+                self.env_specific_metrics["episode_successes"].append(int(env_metrics["episode_successes"]))
+            elif "episode_restarts" in env_metrics:
+                self.env_specific_metrics["episode_successes"].append(int(env_metrics["episode_restarts"]))
+            elif "epsidoe_successes" in env_metrics:
+                self.env_specific_metrics["episode_successes"].append(int(env_metrics["epsidoe_successes"]))
                 
         elif self.env_name == "mpe_simple_spread":
             if "coverage_area" in env_metrics:
@@ -177,8 +182,13 @@ class TAACLogger:
             if self.env_name == "boxjump":
                 if "max_height" in env_metrics:
                     env_str += f"Max Height: {env_metrics['max_height']:.2f}, "
-                if "episode_restarts" in env_metrics:
-                    env_str += f"Restarts: {int(env_metrics['episode_restarts'])}, "
+                # Prefer new key, fallback to legacy names
+                if "episode_successes" in env_metrics:
+                    env_str += f"Successes: {int(env_metrics['episode_successes'])}, "
+                elif "episode_restarts" in env_metrics:
+                    env_str += f"Successes: {int(env_metrics['episode_restarts'])}, "
+                elif "epsidoe_successes" in env_metrics:
+                    env_str += f"Successes: {int(env_metrics['epsidoe_successes'])}, "
                     
             elif self.env_name == "mpe_simple_spread":
                 if "coverage_area" in env_metrics:
@@ -312,10 +322,19 @@ class TAACLogger:
                     print(f"   Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}")
                     for i in tqdm(range(1), desc=f"Individual Max Heights: {[f'{h:.1f}' for h in max_heights]}"):
                         pass
-                restarts = [int(m.get("episode_restarts", 0)) for m in env_metrics_list if m]
-                if any(r is not None for r in restarts):
-                    print(f"   Individual Restarts: {restarts}")
-                    for i in tqdm(range(1), desc=f"Individual Restarts: {restarts}"):
+                successes = []
+                for m in env_metrics_list:
+                    if not m:
+                        continue
+                    if "episode_successes" in m:
+                        successes.append(int(m.get("episode_successes", 0)))
+                    elif "episode_restarts" in m:
+                        successes.append(int(m.get("episode_restarts", 0)))
+                    elif "epsidoe_successes" in m:
+                        successes.append(int(m.get("epsidoe_successes", 0)))
+                if successes:
+                    print(f"   Individual Successes: {successes}")
+                    for i in tqdm(range(1), desc=f"Individual Successes: {successes}"):
                         pass
                     
             elif self.env_name == "mpe_simple_spread":
@@ -391,8 +410,8 @@ class TAACLogger:
         if self.env_name == "boxjump":
             if 'avg_max_height' in stats:
                 print(f"  # Max Height: {stats['avg_max_height']:.2f}")
-            if 'avg_episode_restarts' in stats:
-                print(f"  # Avg Restarts: {stats['avg_episode_restarts']:.2f}")
+            if 'avg_episode_successes' in stats:
+                print(f"  # Avg Successes: {stats['avg_episode_successes']:.2f}")
         elif self.env_name == "mpe_simple_spread":
             if 'avg_collision_count' in stats:
                 print(f"  ! Avg Collisions: {stats['avg_collision_count']:.1f}")

@@ -73,9 +73,6 @@ def evaluate_agent(config: dict, model_path: str) -> None:
     env_config = env_wrapper.env_info
     training_config = config.get('training', {})
     
-    # Merge model configuration if available
-    if 'model' in config:
-        training_config.update(config['model'])
     
     model_name = resolve_model_name(config)
     ModelClass = get_model_class(model_name)
