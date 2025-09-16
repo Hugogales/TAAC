@@ -1,4 +1,4 @@
-job_name: &job_name "13"
+job_name: &job_name "02"
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump"     # Base name for model files
 
@@ -93,3 +93,17 @@ logging:
   save_interval: 100                # Save model checkpoint every N episodes  
   save_best_model: true             # Save best performing model
   stats_update_frequency: 50      # Update statistics graphs and JSON every N episodes (default: 100)
+
+evaluation:
+  models:
+    TAAC: files/Models/boxjump/TAAC_001/taac_10_ep20000.pth
+    PPO: files/Models/boxjump/TAAC_001/ppo_04_ep12200.pth
+    MAAC: files/Models/boxjump/TAAC_001/maac_08_ep20000.pth
+  metrics: [reward, max_height, steps_to_height]
+  episodes: 5
+  max_steps_per_episode: 526
+  num_agents_list: [9, 10]
+  render: false
+  height_formula: "num_agents + 0.1"
+  parrallel:
+    activate: true

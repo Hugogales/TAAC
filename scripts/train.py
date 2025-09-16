@@ -101,7 +101,7 @@ def evaluate_agent(config: dict, model_path: str) -> None:
         done = False
         
         while not done and step_count < 1000:
-            actions, _ = agent.get_actions(list(states.values()))
+            actions, _, _ = agent.get_actions(states)
             states, rewards, done, _ = env_wrapper.step(actions)
             
             episode_reward += sum(rewards)
