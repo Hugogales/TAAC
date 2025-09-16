@@ -1,18 +1,17 @@
-
-job_name: &job_name "01"
+job_name: &job_name "13"
 environment_name: &env_name "boxjump"          # Environment name
-model_base_name: &model_base_name "boxjump_taac"     # Base name for model files
+model_base_name: &model_base_name "boxjump"     # Base name for model files
 
 algorithm:
-  name: "TAAC"
+  name: "MAAC"
 
-#load_model: "files/Models/boxjump/TAAC_001/TAAC_26_ep21000.pth"  # Path to model file to load (or null to train from scratch)
-load_model: null
+load_model: "files/Models/boxjump/MAAC/08/08_ep20000.pth"
+#load_model: null
 job_name: *job_name
 
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [3, 4]  # List of possible agent counts to randomly choose from
+  agent_counts: [8, 9, 10, 11, 12]
   
   # Adaptive termination configuration
   adaptive_termination:
@@ -24,26 +23,26 @@ dynamic_agents:
 
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 128                # Attention embedding dimension (reduced from 256)
-  hidden_size: 256                  # Hidden layer size for networks (reduced from 526)
+  embedding_dim: 64                # Attention embedding dimension (reduced from 256)
+  hidden_size: 128                  # Hidden layer size for networks (reduced from 526)
   model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
 training:
   episodes: 100000                      # Total training episodes (good for testing)
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
-  gamma: 0.985                 # Discount factor (higher for delayed tower rewards)
-  learning_rate: 5e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.12                 # PPO clipping parameter
+  gamma: 0.98                 # Discount factor (higher for delayed tower rewards)
+  learning_rate: 3e-5             # Learning rate for Adam optimizer
+  epsilon_clip: 0.05                # PPO clipping parameter
   K_epochs: 12                   # PPO update epochs per batch
   c_entropy: 0.00                   # Entropy coefficient for exploration
   max_grad_norm: 200               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.98                         # GAE lambda parameter
-  batch_size: 2048
-  min_learning_rate: 0.5e-5       # Minimum learning rate for scheduler
-  similarity_loss_coef: 0.000001         # Cooperation loss (higher = more coordinated behavior)
-  similarity_loss_cap: 0.5          # Max cap for similarity loss to prevent instability
+  batch_size: 6147
+  min_learning_rate: 1e-5       # Minimum learning rate for scheduler
+  similarity_loss_coef: 0.00000        # Cooperation loss (higher = more coordinated behavior)
+  similarity_loss_cap: 0.0          # Max cap for similarity loss to prevent instability
   num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
 
 environment:
@@ -57,15 +56,15 @@ environment:
     penalty_fall_termination: -100.0 # Penalty given only to the fallen agent when termination_on_fall=true
     termination_on_fall: true      # If true, episode terminates when any agent falls off
     reset_episode_on_termination: true  # restart episode when it terminates until max_timestep is reached
-    penalty_fall: 20                # penalty for falling per step
+    penalty_fall: -20                # penalty for falling per step
+    reward_only_biggest_tower: True
 
     # === CORE ENVIRONMENT SETTINGS ===
     num_boxes: 8                   # Number of box agents (2-16). More agents = harder coordination
-    max_timestep:  64               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep:  512               # Episode length in steps (minimal to avoid indexing bug)
     box_width: 1.0                  # Width of each box agent
     box_height: 1.0                 # Height of each box agent
     fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
-    reward_only_biggest_tower: true # Only reward agents in tallest tower chain
     gravity: 10                     # Gravity force (higher = faster falling)
     friction: 0.8                   # Friction between boxes (0-1, higher = less slippery)
     angular_damping: 1              # Prevents excessive spinning (higher = less spinning)

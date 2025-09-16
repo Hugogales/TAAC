@@ -44,30 +44,29 @@ class AttentionActorCriticNetwork(nn.Module):
         self.action_size = action_size
         self.emb_dim = embedding_dim
         self.hidden_size = hidden_size
+        self.state_size = state_size
 
-        # Actor embedding + attention + head
-        self.actor_embedding = nn.Sequential(
-            nn.Linear(state_size, self.hidden_size),
-            nn.LeakyReLU(),
-            nn.Linear(self.hidden_size, embedding_dim),
-        )
-        self.actor_attention_block = nn.MultiheadAttention(
-            embed_dim=embedding_dim,
-            num_heads=num_heads,
-            batch_first=True,
-        )
-        self.actor_out = nn.Sequential(
-            nn.Linear(embedding_dim, self.hidden_size),
+        # actor mlp
+        self.actor_mlp = nn.Sequential(
+            nn.Linear(self.state_size, self.hidden_size),
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
-            nn.Linear(self.hidden_size, action_size),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.action_size),
         )
 
         # Critic embedding + attention + head
         critic_input_size = state_size + action_size
         self.critic_embedding = nn.Sequential(
             nn.Linear(critic_input_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, embedding_dim),
         )
@@ -84,37 +83,28 @@ class AttentionActorCriticNetwork(nn.Module):
             nn.Linear(self.hidden_size, 1),
         )
 
-        print(f"Network created with {sum(p.numel() for p in self.parameters())} parameters")
+        print(f"MAAC Network created with {sum(p.numel() for p in self.parameters())} parameters")
         print(f"State size: {state_size}, Action size: {action_size}, Action type: discrete")
 
     def actor_forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, N, state_dim]
+        returns: [B, N, action_size] (action probabilities)
+        """
         B, N, D = x.shape
-        actor_input = x.reshape(B * N, -1)
-        actor_input = self.actor_embedding(actor_input)
-        actor_input = actor_input.reshape(B, N, -1)
-        attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input)
-        action_logits = self.actor_out(attn_output)
-        action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
-        return action_probs
+        flat = x.reshape(B * N, D)
+        logits = self.actor_mlp(flat)
+        probs = torch.softmax(logits / self.temperature, dim=-1)
+        return probs.view(B, N, self.action_size)
 
     def actor_forward_update(self, x: torch.Tensor):
-        B, N, D = x.shape
-        actor_input = x.reshape(B * N, -1)
-        actor_input = self.actor_embedding(actor_input)
-        actor_input = actor_input.reshape(B, N, -1)
-        attn_output, _ = self.actor_attention_block(actor_input, actor_input, actor_input)
-
-        # Similarity loss (match TAAC semantics)
-        normalized_attn_output = attn_output / attn_output.norm(dim=-1, keepdim=True)
-        similarity_matrix = torch.matmul(normalized_attn_output, normalized_attn_output.transpose(-2, -1))
-        mask = torch.eye(N, device=x.device).unsqueeze(0).expand(B, -1, -1).bool()
-        similarity_matrix = similarity_matrix.masked_fill(mask, 0)
-        similarity_loss = torch.sum(similarity_matrix, dim=(1, 2)) / (N * (N - 1))
-        similarity_loss = torch.clamp(similarity_loss, min=self.similarity_loss_cap).mean()
-
-        action_logits = self.actor_out(attn_output)
-        action_probs = torch.softmax(action_logits / self.temperature, dim=-1)
-        return action_probs, similarity_loss
+        """
+        Same as actor_forward, but returns a tuple (probs, similarity_loss) to match TAAC.
+        For PPO (no attention), similarity_loss = 0.0.
+        """
+        probs = self.actor_forward(x)
+        similarity_loss = torch.tensor(0.0, device=x.device)
+        return probs, similarity_loss
 
     def critic_forward(self, x: torch.Tensor, action_idx: torch.Tensor) -> torch.Tensor:
         B, N, D = x.shape

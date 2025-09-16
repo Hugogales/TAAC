@@ -73,9 +73,6 @@ def evaluate_agent(config: dict, model_path: str) -> None:
     env_config = env_wrapper.env_info
     training_config = config.get('training', {})
     
-    # Merge model configuration if available
-    if 'model' in config:
-        training_config.update(config['model'])
     
     print("=> Loading model: {}".format(model_path))
     taac_agent = TAAC(env_config, training_config, mode="test")
