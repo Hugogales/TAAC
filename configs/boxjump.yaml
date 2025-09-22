@@ -1,30 +1,30 @@
-job_name: &job_name "02"
+job_name: &job_name "20"
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump"     # Base name for model files
 
 algorithm:
-  name: "MAAC"
+  name: "TAAC"
 
-load_model: "files/Models/boxjump/TAAC_001/taac_10_ep20000.pth"
+load_model: files/Models/boxjump/TAAC/17/17_ep8000.pth
 #load_model: null
 job_name: *job_name
 
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [8, 9, 10, 11, 12]
+  agent_counts: [4,5,6]
   
   # Adaptive termination configuration
   adaptive_termination:
     enabled: true                    # Enable adaptive termination height
-    height_formula: "num_agents + 0.1"  # Formula for calculating termination height
+    height_formula: "num_agents + 0.5"  # Formula for calculating termination height
     
   override_num_agents: true         # When true, ignores env_kwargs.num_boxes
   override_termination: true        # When true, ignores env_kwargs.termination_max_height
 
 model:
   num_heads: 8                      # Multi-head attention heads (reduced from 4)
-  embedding_dim: 64
-  hidden_size: 128
+  embedding_dim: 128
+  hidden_size: 256
   model_name: *model_base_name        # Base name for saved models
 
 # Training Configuration  
@@ -32,15 +32,15 @@ training:
   episodes: 100000                      # Total training episodes (good for testing)
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
   gamma: 0.98                 # Discount factor (higher for delayed tower rewards)
-  learning_rate: 3e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.05                # PPO clipping parameter
+  learning_rate: 2e-5             # Learning rate for Adam optimizer
+  epsilon_clip: 0.1                # PPO clipping parameter
   K_epochs: 12                   # PPO update epochs per batch
   c_entropy: 0.00                   # Entropy coefficient for exploration
-  max_grad_norm: 200               # Gradient clipping norm
+  max_grad_norm: 10               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.98                         # GAE lambda parameter
-  batch_size: 6147
-  min_learning_rate: 1e-5       # Minimum learning rate for scheduler
+  batch_size: 2048
+  min_learning_rate: 1e-6       # Minimum learning rate for scheduler
   similarity_loss_coef: 0.00000        # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.0          # Max cap for similarity loss to prevent instability
   num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
@@ -61,7 +61,7 @@ environment:
 
     # === CORE ENVIRONMENT SETTINGS ===
     num_boxes: 13                   # Number of box agents (2-16). More agents = harder coordination
-    max_timestep:  9964               # Episode length in steps (minimal to avoid indexing bug)
+    max_timestep:  512               # Episode length in steps (minimal to avoid indexing bug)
     box_width: 1.0                  # Width of each box agent
     box_height: 1.0                 # Height of each box agent
     fixed_rotation: true            # If true, boxes cannot rotate (MUCH easier!)
@@ -96,13 +96,15 @@ logging:
 
 evaluation:
   models:
-    TAAC: files/Models/boxjump/TAAC_001/taac_10_ep20000.pth
-    PPO: files/Models/boxjump/TAAC_001/ppo_04_ep12200.pth
-    MAAC: files/Models/boxjump/TAAC_001/maac_08_ep20000.pth
+    PPO: files/Models/boxjump/PPO/04/04_ep4900.pth
+    #MAAC: files/Models/boxjump/MAAC/08/08_ep20000.pth
+    MAAC: files/Models/boxjump/MAAC/12/12_ep900.pth
+    #TAAC: files/Models/boxjump/TAAC/10/10_ep20000.pth
+    TAAC: files/Models/boxjump/TAAC/14/14_ep600.pth
   metrics: [reward, max_height, steps_to_height]
-  episodes: 5
-  max_steps_per_episode: 526
-  num_agents_list: [9, 10]
+  episodes: 500
+  max_steps_per_episode: 1024
+  num_agents_list: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   render: false
   height_formula: "num_agents + 0.1"
   parrallel:

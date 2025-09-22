@@ -108,7 +108,7 @@ def _run_evaluations_for_model(
             done = False
 
             max_height = 0.0
-            steps_to_height_events: List[int] = []
+            steps_to_height = None
             target_height = None
             if height_formula:
                 try:
@@ -137,8 +137,8 @@ def _run_evaluations_for_model(
                 if current_best is not None:
                     if current_best > max_height:
                         max_height = current_best
-                    if (target_height is not None) and (current_best >= target_height):
-                        steps_to_height_events.append(step_count)
+                    if (target_height is not None) and (current_best >= target_height) and (steps_to_height is None):
+                        steps_to_height = step_count
 
                 step_count += 1
 
@@ -151,7 +151,7 @@ def _run_evaluations_for_model(
                 "length": int(step_count),
                 "max_height": float(max_height),
             }
-            row["steps_to_height_events"] = [int(s) for s in steps_to_height_events] if steps_to_height_events else []
+            row["steps_to_height"] = int(steps_to_height) if steps_to_height is not None else None
             all_episode_rows.append(row)
 
             if enable_tqdm and hasattr(iterator, 'set_postfix'):
@@ -159,6 +159,8 @@ def _run_evaluations_for_model(
                     iterator.set_postfix({'reward': f"{episode_reward:.2f}", 'max_h': f"{max_height:.2f}"})
                 except Exception:
                     pass
+            
+            print(f"Model: {model_name} | Num Agents: {num_agents} | Episode {ep} | Reward: {episode_reward:.2f} | Max Height: {max_height:.2f}")
 
         env_wrapper.close()
 
@@ -209,7 +211,7 @@ def evaluate(
             device_id = (idx % gpu_count) if gpu_count > 0 else None
             worker_args.append((
                 config, results_dir, model_name, model_path, num_agents_list, metrics,
-                base_env_kwargs, env_name, num_episodes, max_steps, height_formula, device_id, False
+                base_env_kwargs, env_name, num_episodes, max_steps, height_formula, device_id, True
             ))
 
         ctx = mp.get_context('spawn')
@@ -254,11 +256,9 @@ def evaluate(
         lengths = np.array([r["length"] for r in rows], dtype=float)
         max_heights = np.array([r["max_height"] for r in rows], dtype=float)
 
-        # Flatten steps_to_height events across episodes, exclude empties
-        stm_events: List[int] = []
-        for r in rows:
-            stm_events.extend(r.get("steps_to_height_events", []) or [])
-        stm = np.array(stm_events, dtype=float) if stm_events else np.array([], dtype=float)
+        # Collect first steps_to_height per episode (single value or None)
+        sth_values = [r.get("steps_to_height") for r in rows if r.get("steps_to_height") is not None]
+        sth = np.array(sth_values, dtype=float) if len(sth_values) > 0 else np.array([], dtype=float)
 
         summary.append({
             "environment": env_name,
@@ -271,9 +271,9 @@ def evaluate(
             "length_std": float(np.std(lengths)) if lengths.size else 0.0,
             "max_height_mean": float(np.mean(max_heights)) if max_heights.size else 0.0,
             "max_height_std": float(np.std(max_heights)) if max_heights.size else 0.0,
-            "steps_to_height_events_count": int(len(stm_events)),
-            "steps_to_height_events_mean": float(np.mean(stm)) if stm.size else None,
-            "steps_to_height_events_std": float(np.std(stm)) if stm.size else None,
+            "steps_to_height_count": int(len(sth_values)),
+            "steps_to_height_mean": float(np.mean(sth)) if sth.size else None,
+            "steps_to_height_std": float(np.std(sth)) if sth.size else None,
         })
 
     with open(results_path / "summary.json", "w") as f:
@@ -292,8 +292,8 @@ def evaluate(
             plot_rows = []
             for r in all_episode_rows:
                 if metric_key == "steps_to_height":
-                    events = r.get("steps_to_height_events", [])
-                    for v in events:
+                    v = r.get("steps_to_height")
+                    if v is not None:
                         plot_rows.append({
                             "model": r["model"],
                             "num_agents": r["num_agents"],
@@ -347,7 +347,7 @@ def evaluate(
         if 'max_height' in metrics_set:
             plot_metric('max_height', 'Max Height', 'box_max_height.png', lambda r: r['max_height'])
         if 'steps_to_height' in metrics_set:
-            title = 'Steps to Target Height (events)'
+            title = 'Steps to Target Height (first reach)'
             plot_metric('steps_to_height', title, 'box_steps_to_height.png', lambda r: 0.0)
     except Exception as e:
         # Plotting is optional; do not fail evaluation on plotting issues
