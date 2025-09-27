@@ -45,7 +45,29 @@ class AttentionActorCriticNetwork(nn.Module):
         self.emb_dim = embedding_dim
         self.hidden_size = hidden_size
         self.state_size = state_size
-
+        
+        # Critic embedding + attention + head
+        critic_input_size = state_size + action_size
+        self.critic_embedding = nn.Sequential(
+            nn.Linear(critic_input_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, embedding_dim),
+        )
+        self.critic_attention_block = nn.MultiheadAttention(
+            embed_dim=embedding_dim,
+            num_heads=num_heads,
+            batch_first=True,
+        )
+        self.critic_out = nn.Sequential(
+            nn.Linear(embedding_dim + embedding_dim, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.hidden_size, 1),
+        )
+        
         # actor mlp
         self.actor_mlp = nn.Sequential(
             nn.Linear(self.state_size, self.hidden_size),

@@ -494,9 +494,10 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
     # Training parameters
     episodes = training_config['episodes']
     max_steps = training_config.get('max_steps_per_episode', 500)
-    log_interval = config['logging']['log_interval']
-    save_interval = config['logging']['save_interval']
-    stats_update_frequency = config['logging'].get('stats_update_frequency', 100)
+    logging_cfg = config.get('logging', {}) or {}
+    log_interval = int(logging_cfg.get('log_interval', 50))
+    save_interval = int(logging_cfg.get('save_interval', 200))
+    stats_update_frequency = int(logging_cfg.get('stats_update_frequency', 100))
     
     # Initialize logger with StatisticsManager
     logger = TAACLogger(env_name, job_name, experiment_dir=log_dir, stats_update_frequency=stats_update_frequency)

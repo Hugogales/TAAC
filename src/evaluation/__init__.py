@@ -21,6 +21,9 @@ def get_evaluator(environment_name: str) -> Callable:
     if name == "boxjump":
         from .boxjump import evaluate  # local import to avoid importing unnecessary deps
         return evaluate
+    if name == "lbforaging":
+        from .lbforaging import evaluate  # type: ignore
+        return evaluate
 
     raise ValueError(f"No evaluator implemented for environment: {environment_name}")
 

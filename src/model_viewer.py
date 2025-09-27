@@ -14,7 +14,7 @@ import pygame
 import json
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from .model_factory import resolve_model_name, get_model_class
 from .env_wrapper import TAACEnvironmentWrapper
@@ -73,6 +73,29 @@ def find_model_path(base_path: str, env_name: str) -> str:
             return path
     
     raise FileNotFoundError(f"Could not find model for {env_name}. Tried: {search_paths}")
+
+
+def parse_env_overrides(pairs: List[str]) -> Dict[str, Any]:
+    """Parse CLI overrides of the form KEY=VALUE into a dict with basic typing."""
+    overrides: Dict[str, Any] = {}
+    for p in pairs or []:
+        if '=' not in p:
+            continue
+        k, v = p.split('=', 1)
+        k = k.strip()
+        v = v.strip()
+        # Try int, then float, then bool, else string
+        if v.lower() in ('true', 'false'):
+            overrides[k] = (v.lower() == 'true')
+        else:
+            try:
+                overrides[k] = int(v)
+            except ValueError:
+                try:
+                    overrides[k] = float(v)
+                except ValueError:
+                    overrides[k] = v
+    return overrides
 
 
 def load_model(model_path: str, env_wrapper: TAACEnvironmentWrapper, config: Dict[str, Any]):
@@ -304,6 +327,57 @@ def play_game_ai(config: Dict[str, Any], model_path: str, episodes: int = 2,
             print(f"Warning: Error closing environment: {e}")
         
         print(f"=> Visualization complete!")
+
+
+def play_game_random(config: Dict[str, Any], episodes: int = 1,
+                     render_delay: float = 0.05, interactive: bool = True) -> None:
+    """Render the environment with a random policy, honoring env kwargs overrides."""
+    # Setup environment
+    env_name = config['environment']['name']
+    env_kwargs = config['environment'].get('env_kwargs', {})
+    # Force rendering mode
+    env_kwargs['render_mode'] = 'human'
+
+    # Derive max steps from typical keys
+    max_steps = env_kwargs.get('max_timestep') or env_kwargs.get('max_episode_steps') or config.get('training', {}).get('max_steps_per_episode', 1000)
+    max_steps = int(max_steps)
+
+    print(f"=> Creating environment: {env_name} (random policy)")
+    env_wrapper = None
+    try:
+        env_wrapper = TAACEnvironmentWrapper(env_name, **env_kwargs)
+        states, _ = env_wrapper.reset()
+        print(f"=> Env ready: agents={env_wrapper.num_agents}, state_size={env_wrapper.state_size}, action_size={env_wrapper.action_size}")
+
+        # Pygame window handling is inside the underlying env if any; we just step
+        for ep in range(int(episodes)):
+            print(f"\n=== Episode {ep + 1}/{episodes} (random) ===")
+            states, _ = env_wrapper.reset()
+            episode_reward = 0.0
+            step_count = 0
+            done = False
+            while not done and step_count < max_steps:
+                # Sample random actions per agent index order expected by wrapper step
+                actions = {}
+                for i in range(env_wrapper.num_agents):
+                    actions[f"agent_{i}"] = int(np.random.randint(0, env_wrapper.action_size))
+
+                states, rewards, done, info = env_wrapper.step(actions)
+                episode_reward += float(np.sum(rewards))
+                step_count += 1
+                if render_delay and render_delay > 0:
+                    time.sleep(render_delay)
+                if done:
+                    break
+            print(f"Episode reward: {episode_reward:.2f} | length: {step_count}")
+            if interactive and ep < episodes - 1:
+                try:
+                    input("Press Enter for next episode (random)…")
+                except KeyboardInterrupt:
+                    break
+    finally:
+        if env_wrapper is not None:
+            env_wrapper.close()
 
 
 def replay_game(log_file_path: str) -> None:

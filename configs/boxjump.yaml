@@ -26,6 +26,7 @@ model:
   embedding_dim: 128
   hidden_size: 256
   model_name: *model_base_name        # Base name for saved models
+  use_conv: false
 
 # Training Configuration  
 training:
