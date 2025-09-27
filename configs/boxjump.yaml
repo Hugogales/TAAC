@@ -1,17 +1,17 @@
-job_name: &job_name "20"
+job_name: &job_name "08"
 environment_name: &env_name "boxjump"          # Environment name
 model_base_name: &model_base_name "boxjump"     # Base name for model files
 
 algorithm:
-  name: "TAAC"
+  name: "PPO"
 
-load_model: files/Models/boxjump/TAAC/17/17_ep8000.pth
+load_model: files/Models/boxjump/PPO/07/07_ep60000.pth
 #load_model: null
 job_name: *job_name
 
 dynamic_agents:
   enabled: true                     # Enable dynamic agent training (set to true to activate)
-  agent_counts: [4,5,6]
+  agent_counts: [4,5,6,7,8,9]
   
   # Adaptive termination configuration
   adaptive_termination:
@@ -33,13 +33,13 @@ training:
   max_steps_per_episode: 100000       # Max steps per episode (matches environment max_timestep)
   gamma: 0.98                 # Discount factor (higher for delayed tower rewards)
   learning_rate: 2e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.1                # PPO clipping parameter
+  epsilon_clip: 0.05                # PPO clipping parameter
   K_epochs: 12                   # PPO update epochs per batch
   c_entropy: 0.00                   # Entropy coefficient for exploration
   max_grad_norm: 10               # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.98                         # GAE lambda parameter
-  batch_size: 2048
+  batch_size: 8192
   min_learning_rate: 1e-6       # Minimum learning rate for scheduler
   similarity_loss_coef: 0.00000        # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.0          # Max cap for similarity loss to prevent instability
@@ -49,7 +49,7 @@ environment:
   name: *env_name
   env_kwargs:
 
-    reward_mode: "dense_height_cube"          # Reward scheme - Choose based on desired behavior:
+    reward_mode: "dense_height_exp"          # Reward scheme - Choose based on desired behavior:
     termination_reward_coef: 500.0       # Reward given to all agents when termination height is reached    
     termination_max_height: 15.5     # Terminate episode when this height is reached
 
