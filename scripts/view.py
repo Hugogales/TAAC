@@ -29,7 +29,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the core viewing functions from the AI module
 try:
-    from src.model_viewer import load_config, find_model_path, play_game_ai, replay_game
+    from src.model_viewer import load_config, find_model_path, play_game_ai, replay_game, play_game_random, parse_env_overrides
 except ImportError as e:
     print("Error: Could not import model viewer module.")
     print(f"Please ensure that the AI directory and model_viewer.py exist: {e}")
@@ -81,6 +81,10 @@ Examples:
                        help='Delay between steps in seconds (default: 0.05)')
     parser.add_argument('--non_interactive', action='store_true',
                        help='Run without waiting for user input between episodes')
+    parser.add_argument('--random', action='store_true',
+                       help='Run with a random policy (no model required)')
+    parser.add_argument('--env_override', action='append', default=[], metavar='KEY=VALUE',
+                       help='Override environment parameter (can be used multiple times). Example: --env_override players=4')
     
     args = parser.parse_args()
     
@@ -99,25 +103,37 @@ Examples:
             if args.model_name:
                 config.setdefault('algorithm', {})['name'] = args.model_name
                 print(f"=> Overriding model to: {args.model_name}")
+            # Apply environment overrides
+            env_overrides = parse_env_overrides(args.env_override)
+            if env_overrides:
+                config.setdefault('environment', {}).setdefault('env_kwargs', {}).update(env_overrides)
+                print(f"=> Applied env overrides: {env_overrides}")
             
-            # Find model path
             env_name = config['environment']['name']
-            if args.model_path:
-                model_path = args.model_path
+            if args.random:
+                # Random policy visualization (no model needed)
+                play_game_random(
+                    config=config,
+                    episodes=args.episodes,
+                    render_delay=args.render_delay,
+                    interactive=not args.non_interactive
+                )
             else:
-                model_path = config.get('load_model', None)
-            
-            model_path = find_model_path(model_path, env_name)
-            print(f"=> Using model: {model_path}")
-            
-            # Run AI visualization
-            play_game_ai(
-                config=config,
-                model_path=model_path,
-                episodes=args.episodes,
-                render_delay=args.render_delay,
-                interactive=not args.non_interactive
-            )
+                # Find model path
+                if args.model_path:
+                    model_path = args.model_path
+                else:
+                    model_path = config.get('load_model', None)
+                model_path = find_model_path(model_path, env_name)
+                print(f"=> Using model: {model_path}")
+                # Run AI visualization
+                play_game_ai(
+                    config=config,
+                    model_path=model_path,
+                    episodes=args.episodes,
+                    render_delay=args.render_delay,
+                    interactive=not args.non_interactive
+                )
         
         print(f"\n=> Viewing completed successfully!")
         return 0

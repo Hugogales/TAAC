@@ -14,8 +14,11 @@ from supersuit.utils.base_aec_wrapper import BaseWrapper
 
 # Add the environments directory to Python path to ensure proper imports
 ENVIRONMENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "environments")
-if os.path.exists(ENVIRONMENTS_DIR) and ENVIRONMENTS_DIR not in sys.path:
-    sys.path.append(ENVIRONMENTS_DIR)
+if os.path.exists(ENVIRONMENTS_DIR):
+    # Ensure the local environments folder has precedence over site-packages
+    if ENVIRONMENTS_DIR in sys.path:
+        sys.path.remove(ENVIRONMENTS_DIR)
+    sys.path.insert(0, ENVIRONMENTS_DIR)
     print(f"Added environments directory to path: {ENVIRONMENTS_DIR}")
 
 
@@ -93,6 +96,164 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
                 "cd environments\n"
                 "git clone https://github.com/your-repo/mats_gym\n" 
                 "cd mats_gym && pip install -e ."
+            )
+    
+    elif env_name == 'lbforaging':
+        # Level-Based Foraging from https://github.com/semitable/lb-foraging
+        # Prefer PettingZoo parallel API if available; otherwise wrap the Gymnasium env
+        try:
+            try:
+                from pettingzoo.contrib.lbforaging import parallel_env as lbf_parallel
+                # Map our generic keys to LBF expected kwargs when present
+                lbf_kwargs = kwargs.copy()
+                if 'num_agents' in lbf_kwargs and 'players' not in lbf_kwargs:
+                    lbf_kwargs['players'] = int(lbf_kwargs.pop('num_agents'))
+                if 'max_cycles' in lbf_kwargs and 'max_episode_steps' not in lbf_kwargs:
+                    lbf_kwargs['max_episode_steps'] = int(lbf_kwargs.pop('max_cycles'))
+                # Alias support: allow max_food as shorthand for max_num_food
+                if 'max_food' in lbf_kwargs and 'max_num_food' not in lbf_kwargs:
+                    lbf_kwargs['max_num_food'] = int(lbf_kwargs.pop('max_food'))
+                # Ensure field_size is a tuple (rows, cols) if an int is provided
+                if 'field_size' in lbf_kwargs and isinstance(lbf_kwargs['field_size'], int):
+                    n = int(lbf_kwargs['field_size'])
+                    lbf_kwargs['field_size'] = (n, n)
+                return lbf_parallel(**lbf_kwargs)
+            except Exception:
+                pass
+
+            # Fallback: wrap the Gymnasium ForagingEnv into a PettingZoo-parallel-like API
+            from lbforaging.foraging.environment import ForagingEnv  # type: ignore
+
+            lbf_kwargs = kwargs.copy()
+            if 'num_agents' in lbf_kwargs and 'players' not in lbf_kwargs:
+                lbf_kwargs['players'] = int(lbf_kwargs.pop('num_agents'))
+            # Rename common alises
+            if 'max_food' in lbf_kwargs and 'max_num_food' not in lbf_kwargs:
+                lbf_kwargs['max_num_food'] = int(lbf_kwargs.pop('max_food'))
+            if 'max_cycles' in lbf_kwargs and 'max_episode_steps' not in lbf_kwargs:
+                lbf_kwargs['max_episode_steps'] = int(lbf_kwargs.pop('max_cycles'))
+            # Ensure field_size is a tuple (rows, cols)
+            if 'field_size' in lbf_kwargs and isinstance(lbf_kwargs['field_size'], int):
+                n = int(lbf_kwargs['field_size'])
+                lbf_kwargs['field_size'] = (n, n)
+            # Avoid known bug with grid_observation Box shape by disabling if requested
+            if lbf_kwargs.get('grid_observation', False):
+                print("Warning: lbforaging grid_observation=True is not supported in this viewer; forcing False.")
+                lbf_kwargs['grid_observation'] = False
+
+            # Provide required defaults if missing
+            lbf_kwargs.setdefault('min_player_level', 1)
+            # If max_player_level provided, keep; else default 2
+            lbf_kwargs.setdefault('max_player_level', 2)
+            lbf_kwargs.setdefault('min_food_level', 1)
+            # If user provided max_food_level, pass through; else None
+            lbf_kwargs.setdefault('max_food_level', None)
+            lbf_kwargs.setdefault('force_coop', True)
+            lbf_kwargs.setdefault('normalize_reward', True)
+            lbf_kwargs.setdefault('observe_agent_levels', True)
+            lbf_kwargs.setdefault('penalty', 0.0)
+
+            # Avoid env-internal render during reset; we'll render after steps
+            lbf_kwargs['render_mode'] = None
+            base_env = ForagingEnv(**lbf_kwargs)
+
+            class LBForagingParallelWrapper(ParallelEnv):
+                def __init__(self, env):
+                    self.env = env
+                    self.num_players = len(getattr(env, 'players', []))
+                    self.possible_agents = [f"agent-{i+1}" for i in range(self.num_players)]
+                    self.agents = self.possible_agents[:]
+                    self.metadata = getattr(env, 'metadata', {'render_modes': ['human', 'rgb_array'], 'name': "lbforaging_v0"})
+                    # Track food spawn statistics per episode
+                    self._spawned_food_count = 0
+                    self._spawned_food_sum = 0.0
+
+                def reset(self, seed=None, options=None):
+                    obs, info = self.env.reset(seed=seed, options=options)
+                    self.agents = self.possible_agents[:]
+                    # Compute spawned food stats at reset
+                    try:
+                        field = getattr(self.env, 'field', None)
+                        if field is not None:
+                            self._spawned_food_count = int(np.count_nonzero(field))
+                            self._spawned_food_sum = float(np.sum(field))
+                    except Exception:
+                        self._spawned_food_count = 0
+                        self._spawned_food_sum = 0.0
+                    obs_dict = {agent: obs[i] for i, agent in enumerate(self.agents)}
+                    # Inject per-episode meta info for metrics
+                    info_dict = {
+                        agent: {
+                            'foods_spawned_count': self._spawned_food_count,
+                            'foods_spawned_sum': self._spawned_food_sum,
+                        } for agent in self.agents
+                    }
+                    return obs_dict, info_dict
+
+                def step(self, actions):
+                    # actions: dict agent -> discrete action int (0..5). Map to ordered list
+                    ordered = [0] * len(self.agents)
+                    for i, agent in enumerate(self.agents):
+                        if agent in actions:
+                            ordered[i] = int(actions[agent])
+                    obs, rewards, done, truncated, info = self.env.step(ordered)
+                    # Only render when explicitly requested
+                    try:
+                        rmode = getattr(self.env, 'render_mode', None)
+                        if rmode == 'human':
+                            self.env.render()
+                    except Exception:
+                        pass
+                    obs_dict = {agent: obs[i] for i, agent in enumerate(self.agents)}
+                    rew_dict = {agent: float(rewards[i]) for i, agent in enumerate(self.agents)}
+                    terminations = {agent: bool(done) for agent in self.agents}
+                    truncations = {agent: bool(truncated) for agent in self.agents}
+                    # Compute remaining food stats
+                    try:
+                        field = getattr(self.env, 'field', None)
+                        if field is not None:
+                            remaining_count = int(np.count_nonzero(field))
+                            remaining_sum = float(np.sum(field))
+                        else:
+                            remaining_count = None
+                            remaining_sum = None
+                    except Exception:
+                        remaining_count = None
+                        remaining_sum = None
+                    # Build info dict with metrics signals
+                    success_flag = bool(done and (remaining_count == 0 if remaining_count is not None else False))
+                    info_payload = {
+                        'foods_spawned_count': self._spawned_food_count,
+                        'foods_spawned_sum': self._spawned_food_sum,
+                        'foods_remaining_count': remaining_count,
+                        'foods_remaining_sum': remaining_sum,
+                        'episode_success': success_flag,
+                    }
+                    info_dict = {agent: dict(info_payload) for agent in self.agents}
+                    return obs_dict, rew_dict, terminations, truncations, info_dict
+
+                def observation_space(self, agent):
+                    idx = self.possible_agents.index(agent)
+                    return self.env.observation_space[idx]
+
+                def action_space(self, agent):
+                    idx = self.possible_agents.index(agent)
+                    return self.env.action_space[idx]
+
+                def close(self):
+                    self.env.close()
+                
+                def render(self):
+                    try:
+                        return self.env.render()
+                    except Exception:
+                        return None
+
+            return LBForagingParallelWrapper(base_env)
+        except Exception as e:
+            raise ImportError(
+                "lbforaging not available. Install with: pip install lbforaging gymnasium pygame\n"
+                f"Import error: {e}"
             )
     
     elif env_name.startswith('mpe_'):

@@ -228,8 +228,9 @@ def train_taac(config: Dict[str, Any]):
     # Training parameters
     episodes = training_config['episodes']
     max_steps = training_config.get('max_steps_per_episode', 500)
-    log_interval = config['logging']['log_interval']
-    save_interval = config['logging']['save_interval']
+    logging_cfg = config.get('logging', {}) or {}
+    log_interval = int(logging_cfg.get('log_interval', 50))
+    save_interval = int(logging_cfg.get('save_interval', 200))
     
     # Initialize logger
     logger = TAACLogger(env_name, actual_job_name)

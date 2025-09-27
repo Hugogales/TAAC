@@ -26,6 +26,7 @@ model:
   embedding_dim: 128
   hidden_size: 256
   model_name: *model_base_name        # Base name for saved models
+  use_conv: false
 
 # Training Configuration  
 training:
@@ -60,7 +61,7 @@ environment:
     reward_only_biggest_tower: True
 
     # === CORE ENVIRONMENT SETTINGS ===
-    num_boxes: 13                   # Number of box agents (2-16). More agents = harder coordination
+    num_boxes: 10                   # Number of box agents (2-16). More agents = harder coordination
     max_timestep:  512               # Episode length in steps (minimal to avoid indexing bug)
     box_width: 1.0                  # Width of each box agent
     box_height: 1.0                 # Height of each box agent
