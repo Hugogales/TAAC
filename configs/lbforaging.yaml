@@ -27,7 +27,7 @@ training:
   min_learning_rate: 1e-6         # Minimum learning rate for scheduler
   similarity_loss_coef: 0.00000        # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.0          # Max cap for similarity loss to prevent instability
-  num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
+  num_parallel: 2                   # Number of parallel environments (1 = single env, 2+ = parallel training)
 
 logging:
   log_interval: 10                  # Print/flush stats every N episodes
@@ -61,11 +61,11 @@ environment:
     # normalize_reward: divide LOAD rewards by coop sum and total spawned food
     normalize_reward: true
     # force_coop: make spawned foods often require cooperation
-    force_coop: true
+    force_coop: False
     # penalty: negative reward per failed LOAD attempt
     penalty: 0.0
   apply_wrappers: true
-  render_mode: None
+  render_mode: "human"
 
 evaluation:
   models:

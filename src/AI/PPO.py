@@ -42,7 +42,7 @@ class MLPActorCriticNetwork(nn.Module):
         self.hidden_size = hidden_size
         self.temperature = 1.0
         self.similarity_loss_cap = 0.0  # kept for interface compatibility
-
+    
         self.actor_mlp = nn.Sequential(
             nn.Linear(self.state_size, self.hidden_size),
             nn.LeakyReLU(),
@@ -72,7 +72,7 @@ class MLPActorCriticNetwork(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(self.hidden_size, 1),
         )
-
+       
         print(f"PPO Network created with {sum(p.numel() for p in self.parameters())} parameters")
         print(f"State size: {state_size}, Action size: {action_size}, Action type: discrete")
 
@@ -345,7 +345,7 @@ class PPO:
 
                 # Calculate loss
                 actor_loss = -torch.min(surr1, surr2).mean()
-                critic_loss = self.MseLoss(state_values_new.squeeze(), mini_gae_returns)
+                critic_loss = self.MseLoss(state_values_new.squeeze(), mini_gae_returns) 
                 loss = actor_loss + self.c_value * critic_loss - self.c_entropy * dist_entropy.mean()
 
                 # Backward pass and optimization
@@ -371,7 +371,7 @@ class PPO:
         baseline_values = baseline_values.detach().cpu().numpy()
         dones = dones.detach().cpu().numpy()
         rewards = rewards.detach().cpu().numpy()
-
+        
         gamma = self.gamma
         advantages = []
         gae = 0.0
@@ -405,7 +405,7 @@ class PPO:
         else:
             print(f"Model file {model_path} does not exist.")
             return False
-
+        
     def clone(self):
         return self.__class__(
             env_config={
@@ -429,15 +429,15 @@ class PPO:
             },
             mode=self.mode,
         )
-
+    
     def assign_device(self, device):
         self.device = device
         self.policy.to(device)
         self.policy_old.to(device)
-
+    
     def load_state_dict(self, state_dict):
         self.policy.load_state_dict(state_dict)
         self.policy_old.load_state_dict(state_dict)
-
+    
     def state_dict(self):
         return self.policy.state_dict()

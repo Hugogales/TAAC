@@ -153,8 +153,9 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
             lbf_kwargs.setdefault('observe_agent_levels', True)
             lbf_kwargs.setdefault('penalty', 0.0)
 
-            # Avoid env-internal render during reset; we'll render after steps
-            lbf_kwargs['render_mode'] = None
+            # Respect incoming render_mode; default to None to avoid env rendering during reset
+            if 'render_mode' not in lbf_kwargs:
+                lbf_kwargs['render_mode'] = None
             base_env = ForagingEnv(**lbf_kwargs)
 
             class LBForagingParallelWrapper(ParallelEnv):
@@ -164,12 +165,24 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
                     self.possible_agents = [f"agent-{i+1}" for i in range(self.num_players)]
                     self.agents = self.possible_agents[:]
                     self.metadata = getattr(env, 'metadata', {'render_modes': ['human', 'rgb_array'], 'name': "lbforaging_v0"})
+                    # Expose render_mode for upstream wrappers
+                    self.render_mode = getattr(env, 'render_mode', None)
                     # Track food spawn statistics per episode
                     self._spawned_food_count = 0
                     self._spawned_food_sum = 0.0
 
                 def reset(self, seed=None, options=None):
-                    obs, info = self.env.reset(seed=seed, options=options)
+                    # LBF calls render() inside reset if render_mode == 'human'; temporarily disable it
+                    original_render = getattr(self.env, 'render', None)
+                    try:
+                        if original_render is not None:
+                            def _noop_render(*args, **kwargs):
+                                return None
+                            setattr(self.env, 'render', _noop_render)
+                        obs, info = self.env.reset(seed=seed, options=options)
+                    finally:
+                        if original_render is not None:
+                            setattr(self.env, 'render', original_render)
                     self.agents = self.possible_agents[:]
                     # Compute spawned food stats at reset
                     try:

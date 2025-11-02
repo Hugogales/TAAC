@@ -145,30 +145,30 @@ class AttentionActorCriticNetwork(nn.Module):
     @torch.no_grad()
     def multi_agent_baseline(self, x: torch.Tensor, action_idx: torch.Tensor) -> torch.Tensor:
         B, N, D = x.shape
-        full_action_probs = self.actor_forward(x)  # [B, N, A]
+            full_action_probs = self.actor_forward(x)  # [B, N, A]
 
-        chosen_action_one_hot = torch.zeros(B, N, self.action_size, device=x.device)
-        chosen_action_one_hot.scatter_(-1, action_idx.unsqueeze(-1), 1)
+            chosen_action_one_hot = torch.zeros(B, N, self.action_size, device=x.device)
+            chosen_action_one_hot.scatter_(-1, action_idx.unsqueeze(-1), 1)
         chosen_critic_input = torch.cat([x, chosen_action_one_hot], dim=-1)
         chosen_critic_input = chosen_critic_input.view(B * N, -1)
         chosen_emb = self.critic_embedding(chosen_critic_input)
         chosen_emb = chosen_emb.view(B, N, -1)
 
-        x_expanded = x.unsqueeze(2).repeat(1, 1, self.action_size, 1)
-        range_actions = torch.arange(self.action_size, device=x.device).view(1, 1, -1)
+            x_expanded = x.unsqueeze(2).repeat(1, 1, self.action_size, 1)
+            range_actions = torch.arange(self.action_size, device=x.device).view(1, 1, -1)
         action_range = range_actions.repeat(B, N, 1)
-        all_action_one_hot = torch.zeros(B, N, self.action_size, self.action_size, device=x.device)
+            all_action_one_hot = torch.zeros(B, N, self.action_size, self.action_size, device=x.device)
         all_action_one_hot.scatter_(-1, action_range.unsqueeze(-1), 1)
-        critic_input_all = torch.cat([x_expanded, all_action_one_hot], dim=-1)
+            critic_input_all = torch.cat([x_expanded, all_action_one_hot], dim=-1)
         critic_input_all = critic_input_all.view(B * N * self.action_size, -1)
         all_actions_emb = self.critic_embedding(critic_input_all)
         all_actions_emb = all_actions_emb.view(B, N, self.action_size, -1)
 
-        baseline_values = torch.zeros(B, N, device=x.device)
-        for i in range(N):
+            baseline_values = torch.zeros(B, N, device=x.device)
+            for i in range(N):
             agent_emb_list = chosen_emb.clone()
-            agent_emb_list = agent_emb_list.unsqueeze(2).repeat(1, 1, self.action_size, 1)
-            agent_emb_list[:, i, :, :] = all_actions_emb[:, i, :, :]
+                agent_emb_list = agent_emb_list.unsqueeze(2).repeat(1, 1, self.action_size, 1)
+                agent_emb_list[:, i, :, :] = all_actions_emb[:, i, :, :]
             agent_emb_list = agent_emb_list.permute(0, 2, 1, 3)
             agent_emb_list = agent_emb_list.reshape(B * self.action_size, N, -1)
 
@@ -179,8 +179,8 @@ class AttentionActorCriticNetwork(nn.Module):
             agent_values = agent_values.view(B, self.action_size)
             agent_probs = full_action_probs[:, i, :]
             agent_baseline = (agent_values * agent_probs).sum(dim=1)
-            baseline_values[:, i] = agent_baseline
-        return baseline_values
+                baseline_values[:, i] = agent_baseline
+            return baseline_values
 
 
 class MAAC:
@@ -266,7 +266,7 @@ class MAAC:
             raise e
 
     def get_actions(self, states):
-        with torch.no_grad():
+            with torch.no_grad():
             actions, log_probs, entropies = self.select_action(states)
         self.store_experience(states, actions, log_probs)
         return actions, log_probs, entropies
@@ -393,7 +393,7 @@ class MAAC:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
                 self.optimizer.step()
-
+        
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.scheduler.step()
         return float(final_similarity_loss.item())
@@ -457,6 +457,6 @@ class MAAC:
     def load_state_dict(self, state_dict):
         self.policy.load_state_dict(state_dict)
         self.policy_old.load_state_dict(state_dict)
-
+    
     def state_dict(self):
         return self.policy.state_dict()

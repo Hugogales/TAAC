@@ -244,12 +244,12 @@ class PersistentWorker:
                 
             self.env_wrapper = TAACEnvironmentWrapper(self.env_name, **updated_env_kwargs)
             print(f"Worker {self.worker_id}: Episode {episode_num} - Recreated env with {agent_count} agents")
-        
+            
         # Ensure memory is properly prepared for this episode
         current_num_agents = self.env_wrapper.num_agents
         self.model.memory_prep(current_num_agents)
         print(f"Worker {self.worker_id}: num memories = {len(self.model.memories)} for {current_num_agents} agents")
-
+            
         # LBForaging multi-game mode
         if self.env_name == 'lbforaging':
             games_per_epoch = int(self.training_config.get('num_games', 1))
@@ -522,8 +522,6 @@ def train_taac_parallel(config: Dict[str, Any], num_parallel_games: int = 4):
             print(f"=> Loaded model from: {load_path}")
         else:
             print(f"=> Starting from random initialization (no valid model to load: {load_path})")
-    else:
-        print("=> Starting from random initialization (no pre-trained weights)")
     
     # Close sample environment
     sample_env.close()
