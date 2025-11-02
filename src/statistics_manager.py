@@ -66,6 +66,9 @@ class StatisticsManager:
         self.env_name = env_name.lower()
         self.update_frequency = update_frequency
         
+        # Curriculum stage markers (episode index and label)
+        self.stage_markers: List[Dict[str, Any]] = []
+        
         # Ensure experiment directory exists
         os.makedirs(experiment_dir, exist_ok=True)
         
@@ -116,7 +119,8 @@ class StatisticsManager:
         if self.env_name == "boxjump":
             self.env_metrics = {
                 'max_height_achieved': [],
-                'stable_agents_ratio': []
+                'stable_agents_ratio': [],
+                'current_N': []
             }
         elif self.env_name == "mpe_simple_spread":
             self.env_metrics = {
@@ -309,6 +313,21 @@ class StatisticsManager:
                 plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes, 
                         verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
             
+            # Draw curriculum stage markers (vertical lines)
+            try:
+                if isinstance(self.stage_markers, list) and len(self.stage_markers) > 0:
+                    ax = plt.gca()
+                    for marker in self.stage_markers:
+                        ep = marker.get('episode')
+                        label = marker.get('label')
+                        if ep is None:
+                            continue
+                        ax.axvline(x=ep, color='gray', linestyle='--', alpha=0.6)
+                        if label:
+                            ax.text(ep, ax.get_ylim()[1], label, rotation=90, va='top', ha='right', fontsize=8, color='gray')
+            except Exception:
+                pass
+
             plt.tight_layout()
             
             # Save graph
@@ -401,6 +420,20 @@ class StatisticsManager:
                 ax.set_xlabel('Episode')
                 ax.set_ylabel(ylabel)
                 ax.grid(True, alpha=0.3)
+
+                # Draw stage markers
+                try:
+                    if isinstance(self.stage_markers, list) and len(self.stage_markers) > 0:
+                        for marker in self.stage_markers:
+                            ep = marker.get('episode')
+                            label = marker.get('label')
+                            if ep is None:
+                                continue
+                            ax.axvline(x=ep, color='gray', linestyle='--', alpha=0.6)
+                            if label:
+                                ax.text(ep, ax.get_ylim()[1], label, rotation=90, va='top', ha='right', fontsize=8, color='gray')
+                except Exception:
+                    pass
                 
             except Exception as e:
                 print(f"Error plotting {title} in overview: {e}")
@@ -418,6 +451,18 @@ class StatisticsManager:
         overview_path = os.path.join(self.graphs_dir, 'training_overview.png')
         plt.savefig(overview_path, dpi=300, bbox_inches='tight')
         plt.close()
+
+    def add_stage_marker(self, episode: int, N_value: int):
+        """Record a stage transition marker to be drawn on graphs.
+        Args:
+            episode: Global episode index (1-based) at which the stage switch happened
+            N_value: The new number of agents/stage identifier
+        """
+        try:
+            label = f"N={N_value}"
+            self.stage_markers.append({'episode': int(episode), 'label': label})
+        except Exception:
+            pass
     
     def _smooth_data(self, data: np.ndarray, window: int) -> np.ndarray:
         """Apply moving average smoothing to data with proper error handling."""

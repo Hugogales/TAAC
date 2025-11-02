@@ -15,9 +15,9 @@
 #SBATCH --account=undergrad_research
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=16
-#SBATCH --job-name=P-BOX-08
-#SBATCH --output=jobs/boxjump/PPO/08/slurm.out
-#SBATCH --error=jobs/boxjump/PPO/08/slurm.err
+#SBATCH --job-name=T-BOX-34
+#SBATCH --output=jobs/boxjump/TAAC/34/slurm.out
+#SBATCH --error=jobs/boxjump/TAAC/34/slurm.err
 
 echo "Running on node: $(hostname)"
 echo "Time: $(date)"
@@ -39,6 +39,12 @@ fi
 echo "Activating taac environment..."
 conda activate taac || { echo "ERROR: Failed to activate 'taac' conda env."; conda info --envs; exit 1; }
 echo "Conda environment activated"
+
+# Limit thread oversubscription for BLAS/OpenMP libs
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 # Verify environment
 echo "Python executable: $(which python)"

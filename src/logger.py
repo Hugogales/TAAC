@@ -282,6 +282,13 @@ class TAACLogger:
                     # Calculate ratio of agents that can jump (stable)
                     stable_count = sum(1 for h in max_heights if h > 2)  # Assuming height > 2 means stable
                     env_specific_stats["stable_agents_ratio"] = stable_count / len(max_heights) 
+                    # Record current N (number of agents) if present
+                    try:
+                        Ns = [int(m.get("current_N")) for m in env_metrics_list if m and (m.get("current_N") is not None)]
+                        if Ns:
+                            env_specific_stats["current_N"] = float(np.mean(Ns))
+                    except Exception:
+                        pass
             
             try:
                 self.stats_manager.add_episode_metrics(

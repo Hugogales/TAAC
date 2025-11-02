@@ -205,7 +205,10 @@ def make_env(env_name: str, **kwargs) -> ParallelEnv:
                     except Exception:
                         pass
                     obs_dict = {agent: obs[i] for i, agent in enumerate(self.agents)}
-                    rew_dict = {agent: float(rewards[i]) for i, agent in enumerate(self.agents)}
+                    # Make rewards fully cooperative: sum across agents then divide by number of agents
+                    total_reward = float(np.sum(rewards))
+                    avg_reward = total_reward / max(1, len(self.agents))
+                    rew_dict = {agent: avg_reward for agent in self.agents}
                     terminations = {agent: bool(done) for agent in self.agents}
                     truncations = {agent: bool(truncated) for agent in self.agents}
                     # Compute remaining food stats
@@ -705,6 +708,16 @@ class TAACEnvironmentWrapper:
         else:
             # Default handling for unknown environments
             observations, rewards, dones, info = self._step_default(env_actions)
+
+        # If lbforaging, enforce fully-cooperative reward at each timestep
+        if self.env_name == 'lbforaging':
+            try:
+                if isinstance(rewards, dict) and rewards:
+                    total = float(sum(rewards.values()))
+                    avg = total / float(self.num_agents)
+                    rewards = {agent: avg for agent in rewards.keys()}
+            except Exception:
+                pass
         
         # Convert to TAAC format
         states = []

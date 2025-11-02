@@ -5,9 +5,9 @@
 # This script takes one argument: a unique job name for the experiment.
 # This job name is used to create a dedicated directory for logs, models,
 # and statistics, keeping your experiments organized.
-# nameing = T-BOX-01 = boxjump/taac/01
-# naming = M-BOX-01 = boxjump/maac/01
-# naming = P-BOX-02 = boxjump/ppo/02
+# nameing = T-LBF-01 = lbforaging/taac/01
+# naming = M-LBF-01 = lbforaging/maac/01
+# naming = P-LBF-02 = lbforaging/ppo/02
 
 # --- SBATCH Directives ---
 #SBATCH --partition=teaching
@@ -15,9 +15,9 @@
 #SBATCH --account=undergrad_research
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=16
-#SBATCH --job-name=P-BOX-08
-#SBATCH --output=jobs/boxjump/PPO/08/slurm.out
-#SBATCH --error=jobs/boxjump/PPO/08/slurm.err
+#SBATCH --job-name=P-LBF-04
+#SBATCH --output=jobs/lbforaging/PPO/04/slurm.out
+#SBATCH --error=jobs/lbforaging/PPO/04/slurm.err
 
 echo "Running on node: $(hostname)"
 echo "Time: $(date)"
@@ -40,6 +40,12 @@ echo "Activating taac environment..."
 conda activate taac || { echo "ERROR: Failed to activate 'taac' conda env."; conda info --envs; exit 1; }
 echo "Conda environment activated"
 
+# Limit thread oversubscription for BLAS/OpenMP libs
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
 # Verify environment
 echo "Python executable: $(which python)"
 echo "Python version: $(python --version)"
@@ -48,7 +54,7 @@ python -c "import torch; print(f'PyTorch {torch.__version__} with CUDA {torch.ve
 echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
 
 # Run the main training script, passing the job name
-python scripts/train.py --config=configs/boxjump.yaml
+python scripts/train.py --config=configs/lbforaging.yaml
 
 echo "Job finished with exit code $?."
 echo "Time: $(date)"
