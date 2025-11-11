@@ -1,7 +1,7 @@
-job_name: "04"
+job_name: "109"
 
 algorithm:
-  name: "PPO"
+  name: "MAAC"
 
 load_model: null
 
@@ -12,22 +12,22 @@ model:
   model_name: "lbforaging"        # Base name for saved models
 
 training:
-  episodes: 300000                      # Total training episodes (good for testing)
+  episodes: 20000                      # Total training episodes (good for testing)
   max_steps_per_episode: 100000
-  num_games: 2                    # Number of games per epoch per worker (total steps = max_steps_per_episode * num_games)
+  num_games: 3                    # Number of games per epoch per worker (total steps = max_steps_per_episode * num_games)
   gamma: 0.99                   # Discount factor (higher for delayed tower rewards)
   learning_rate: 2e-5             # Learning rate for Adam optimizer
-  epsilon_clip: 0.1                # PPO clipping parameter
+  epsilon_clip: 0.2                # PPO clipping parameter
   K_epochs: 12                   # PPO update epochs per batch
-  c_entropy: 0.004                  # Entropy coefficient for exploration
-  max_grad_norm: 200                # Gradient clipping norm
+  c_entropy: 0.007                  # Entropy coefficient for exploration
+  max_grad_norm: 20                # Gradient clipping norm
   c_value: 0.5                      # Value function loss coefficient
   lam: 0.99                         # GAE lambda parameter
-  batch_size: 512
+  batch_size: 4096
   min_learning_rate: 1e-6         # Minimum learning rate for scheduler
   similarity_loss_coef: 0.00000        # Cooperation loss (higher = more coordinated behavior)
   similarity_loss_cap: 0.0          # Max cap for similarity loss to prevent instability
-  num_parallel: 2                   # Number of parallel environments (1 = single env, 2+ = parallel training)
+  num_parallel: 4                   # Number of parallel environments (1 = single env, 2+ = parallel training)
 
 logging:
   log_interval: 10                  # Print/flush stats every N episodes
@@ -40,18 +40,18 @@ environment:
   name: "lbforaging"
   env_kwargs:
     # players: number of agents (alias: num_agents)
-    players: 3
+    players: 8
     # field_size: grid size (int => square; tuple => (rows, cols))
-    field_size: 7
+    field_size: 10
     # max_food: maximum number of food spawned (alias: max_num_food)
-    max_food: 6
+    max_food: 24
     # min_player_level/max_player_level: agent level bounds (int or list per-agent)
     max_player_level: 2
     # min_food_level/max_food_level: food level bounds (int or list per-food)
     # min_food_level: 1
     # max_food_level: null
     # sight: vision radius around each agent (only for grid_observation=true)
-    sight: 7 
+    sight: 10
     # max_episode_steps: episode length cap (alias: max_cycles)
     max_episode_steps: 512
     # grid_observation: True => 3x(HxW) tensors; False => flat vectors
@@ -61,7 +61,7 @@ environment:
     # normalize_reward: divide LOAD rewards by coop sum and total spawned food
     normalize_reward: true
     # force_coop: make spawned foods often require cooperation
-    force_coop: False
+    force_coop: false
     # penalty: negative reward per failed LOAD attempt
     penalty: 0.0
   apply_wrappers: true
